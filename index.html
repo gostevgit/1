@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Громадянство ЄС — персональний план легалізації</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Mulish:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/imask"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0A0A0A;
+  --bg2: #181818;
+  --card: #121212;
+  --dark: #FFFFFF;
+  --red: #F5C400;
+  --red2: #FFD700;
+  --gold: #F5C400;
+  --muted: #666660;
+  --border: #242424;
+  --text: #E8E8E8;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Mulish', sans-serif;
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 16px 60px;
+  position: relative;
+  overflow-x: hidden;
+}
+
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 28px,
+    rgba(245,196,0,0.03) 28px,
+    rgba(245,196,0,0.03) 29px
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+.wrap {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 580px;
+}
+
+.hero-logo {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  margin-bottom: 16px;
+  line-height: 1;
+  text-align: center;
+}
+.logo-a { color: #FFFFFF; }
+.logo-d { color: #F5C400; }
+
+.hero {
+  background: #111111;
+  border-radius: 20px 20px 0 0;
+  padding: 36px 36px 32px;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -40px; right: -40px;
+  width: 220px; height: 220px;
+  background: radial-gradient(circle, rgba(245,196,0,0.2) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.hero::after {
+  content: 'EU';
+  position: absolute;
+  bottom: -18px; right: 20px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 110px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.04);
+  letter-spacing: -2px;
+  pointer-events: none;
+  line-height: 1;
+}
+
+.hero-flag {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.45);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+
+.hero-flag::before {
+  content: '';
+  display: inline-block;
+  width: 28px; height: 2px;
+  background: var(--red2);
+}
+
+.hero-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(28px, 6vw, 42px);
+  font-weight: 800;
+  line-height: 1.1;
+  color: #fff;
+  letter-spacing: 0.01em;
+  margin-bottom: 14px;
+  text-align: center;
+}
+
+.hero-title .gold { color: #F0B429; }
+
+.hero-sub {
+  font-size: 14px;
+  color: rgba(255,255,255,0.5);
+  line-height: 1.55;
+  max-width: 400px;
+  margin: 0 auto;
+  font-weight: 300;
+  text-align: center;
+}
+
+.hero-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+  justify-content: center;
+}
+
+.hero-tag {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 100px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.6);
+  font-weight: 500;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 20px 20px;
+  padding: 32px 36px 36px;
+  animation: fadeUp 0.5s ease both;
+}
+
+.prog-wrap {
+  margin-bottom: 28px;
+}
+
+.prog-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.prog-step {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.prog-pct {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--red);
+}
+
+.prog-track {
+  height: 4px;
+  background: #2A2A2A;
+  border-radius: 100px;
+  overflow: hidden;
+}
+
+.prog-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--red), var(--red2));
+  border-radius: 100px;
+  transition: width 0.5s cubic-bezier(.4,0,.2,1);
+}
+
+.step { display: none; }
+.step.active { display: block; animation: slideIn 0.35s ease both; }
+
+.q-num {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--red);
+  margin-bottom: 8px;
+}
+
+.q-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(20px, 4.5vw, 28px);
+  font-weight: 700;
+  line-height: 1.2;
+  color: #FFFFFF;
+  margin-bottom: 4px;
+  letter-spacing: 0.01em;
+}
+
+.q-hint {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 22px;
+  font-weight: 300;
+  line-height: 1.5;
+}
+
+.options { display: flex; flex-direction: column; gap: 9px; }
+
+.opt {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.2, 0.9, 0.4, 1.1);
+  background: #1E1E1E;
+  text-align: left;
+  width: 100%;
+  color: var(--text);
+  font-family: 'Mulish', sans-serif;
+}
+
+.opt:hover {
+  border-color: rgba(200,146,42,0.5);
+  background: rgba(200,146,42,0.06);
+  transform: translateX(4px);
+}
+
+.opt.sel {
+  border-color: var(--gold);
+  background: rgba(200,146,42,0.08);
+}
+
+.opt-radio {
+  width: 20px; height: 20px;
+  border: 2px solid #444;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.18s;
+}
+
+.opt.sel .opt-radio {
+  border-color: var(--red);
+  background: var(--red);
+}
+
+.opt.sel .opt-radio::after {
+  content: '';
+  width: 7px; height: 7px;
+  background: #fff;
+  border-radius: 50%;
+}
+
+.opt-icon { font-size: 20px; flex-shrink: 0; }
+
+.opt-body { flex: 1; }
+.opt-main { font-size: 15px; font-weight: 500; line-height: 1.3; color: #E8E8E8; }
+.opt-sub { font-size: 12px; color: var(--muted); margin-top: 2px; font-weight: 400; }
+
+.opt-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 100px;
+  background: rgba(245,196,0,0.15);
+  color: var(--red);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.field-group { margin-bottom: 14px; }
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 7px;
+}
+
+.field-input {
+  width: 100%;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 13px 15px;
+  font-family: 'Mulish', sans-serif;
+  font-size: 15px;
+  color: var(--text);
+  background: #1E1E1E;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.field-input::placeholder { color: #444; }
+.field-input:focus { border-color: var(--gold); background: #222; }
+
+.btn-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 26px;
+}
+
+.btn-back {
+  padding: 13px 18px;
+  background: transparent;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  font-family: 'Mulish', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.18s;
+  flex-shrink: 0;
+}
+.btn-back:hover { border-color: #444; color: var(--text); }
+
+.btn-next {
+  flex: 1;
+  padding: 14px 20px;
+  background: var(--gold);
+  border: none;
+  border-radius: 10px;
+  font-family: 'Mulish', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #000;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  letter-spacing: 0.02em;
+}
+.btn-next:hover:not(:disabled) {
+  background: var(--red2);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(245,196,0,0.35);
+}
+.btn-next:disabled { opacity: 0.25; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.btn-submit {
+  background: linear-gradient(135deg, var(--gold), var(--red2));
+  font-size: 16px;
+  padding: 16px 24px;
+  letter-spacing: 0.03em;
+  color: #000;
+}
+.btn-submit:disabled { opacity: 0.5; }
+
+.success {
+  text-align: center;
+  padding: 10px 0 16px;
+  animation: fadeUp 0.5s ease both;
+}
+
+.success-emo { font-size: 60px; margin-bottom: 18px; animation: pop 0.5s 0.1s ease both; }
+
+.success-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(24px, 5vw, 36px);
+  font-weight: 800;
+  color: #FFFFFF;
+  line-height: 1.2;
+  margin-bottom: 12px;
+  letter-spacing: 0.01em;
+}
+
+.success-title .red { color: var(--gold); }
+
+.success-body {
+  font-size: 15px;
+  color: #999;
+  line-height: 1.65;
+  max-width: 400px;
+  margin: 0 auto 24px;
+  font-weight: 300;
+}
+
+.success-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #1E1E1E;
+  border: 1.5px solid var(--border);
+  border-radius: 100px;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 28px;
+}
+
+.foot-note {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.spinner-screen {
+  display: none;
+  text-align: center;
+  padding: 40px 20px;
+  animation: fadeUp 0.4s ease both;
+}
+.spinner-screen.active { display: block; }
+
+.spinner {
+  width: 52px; height: 52px;
+  border: 4px solid var(--bg2);
+  border-top-color: var(--red);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  margin: 0 auto 20px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.spinner-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 26px;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin-bottom: 8px;
+}
+
+.spinner-sub {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.rodo-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: #1A1A1A;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.rodo-wrap input[type="checkbox"] {
+  width: 18px; height: 18px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  accent-color: var(--red);
+  cursor: pointer;
+}
+
+.rodo-label {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.urgency {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(245,196,0,0.08);
+  border: 1px solid rgba(245,196,0,0.2);
+  border-radius: 8px;
+  padding: 9px 14px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--gold);
+  font-weight: 600;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pop {
+  0% { transform: scale(0.3); opacity: 0; }
+  65% { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@media (max-width: 480px) {
+  .hero { padding: 28px 22px 26px; }
+  .card { padding: 24px 20px 28px; }
+  .hero::after { font-size: 80px; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <div class="hero">
+    <div class="hero-logo"><span class="logo-a">EURO</span><span class="logo-d">CITIZEN</span></div>
+    <div class="hero-flag">🇪🇺 ГРОМАДЯНСТВО ЄС — ЛЕГАЛІЗАЦІЯ</div>
+    <div class="hero-title">
+      Паспорт ЄС<br>
+      <span class="gold">за спрощеною процедурою</span>
+    </div>
+    <div class="hero-sub">
+      Дайте відповідь на 7 запитань — ми підготуємо персональний план легалізації
+    </div>
+    <div class="hero-tags">
+      <span class="hero-tag">✅ Безкоштовний аналіз</span>
+      <span class="hero-tag">🇪🇺 Румунія / Болгарія</span>
+      <span class="hero-tag">📄 Підбір документів</span>
+      <span class="hero-tag">⚡ Під ключ</span>
+    </div>
+  </div>
+
+  <div class="card">
+
+    <div class="prog-wrap" id="progWrap">
+      <div class="prog-label">
+        <span class="prog-step" id="progLabel">Питання 1 з 7</span>
+        <span class="prog-pct" id="progPct">14%</span>
+      </div>
+      <div class="prog-track">
+        <div class="prog-fill" id="progFill" style="width:14%"></div>
+      </div>
+    </div>
+
+    <!-- Q1: Напрямок -->
+    <div class="step active" id="step1">
+      <div class="q-num">Питання 01 / 07</div>
+      <div class="q-title">Яке громадянство ЄС вас цікавить найбільше?</div>
+      <div class="q-hint">Виберіть один варіант</div>
+      <div class="options">
+        <button class="opt" onclick="pick(this,'direction','ro')" data-step="1"><div class="opt-radio"></div><span class="opt-icon">🇷🇴</span><div class="opt-body"><div class="opt-main">Громадянство Румунії</div><div class="opt-sub">На основі коренів з Бессарабії, Буковини</div></div></button>
+        <button class="opt" onclick="pick(this,'direction','bg')" data-step="1"><div class="opt-radio"></div><span class="opt-icon">🇧🇬</span><div class="opt-body"><div class="opt-main">Громадянство Болгарії</div><div class="opt-sub">Болгарське коріння</div></div></button>
+        <button class="opt" onclick="pick(this,'direction','dunno')" data-step="1"><div class="opt-radio"></div><span class="opt-icon">🤔</span><div class="opt-body"><div class="opt-main">Поки не знаю, потрібна порада</div><div class="opt-sub">Допоможемо визначити оптимальний шлях</div></div></button>
+      </div>
+      <div class="btn-row"><button class="btn-next" id="btn1" onclick="go(2)" disabled>Далі →</button></div>
+    </div>
+
+    <!-- Q2: Корені + території -->
+    <div class="step" id="step2">
+      <div class="q-num">Питання 02 / 07</div>
+      <div class="q-title">Чи маєте ви інформацію про предків, які народилися або жили до 1940 року на території колишньої Бессарабії, Буковини (Чернівецька, Одеська обл., Молдова) або мають болгарське коріння?</div>
+      <div class="q-hint">Це ключове питання — від нього залежить складність справи</div>
+      <div class="options">
+        <button class="opt" onclick="pick(this,'roots','yes_docs')" data-step="2"><div class="opt-radio"></div><span class="opt-icon">📄</span><div class="opt-body"><div class="opt-main">Так, є документи</div><div class="opt-sub">Метрики, свідоцтва, архівні довідки</div></div><span class="opt-tag">🟢 Низька складність</span></button>
+        <button class="opt" onclick="pick(this,'roots','yes_nodocs')" data-step="2"><div class="opt-radio"></div><span class="opt-icon">🔍</span><div class="opt-body"><div class="opt-main">Знаю точно, але документів немає</div><div class="opt-sub">Потрібен пошук в архівах</div></div><span class="opt-tag">🟡 Середня складність</span></button>
+        <button class="opt" onclick="pick(this,'roots','check')" data-step="2"><div class="opt-radio"></div><span class="opt-icon">❓</span><div class="opt-body"><div class="opt-main">Потрібно перевіряти</div><div class="opt-sub">Не впевнений, потрібен аналіз</div></div><span class="opt-tag">🔴 Висока складність</span></button>
+      </div>
+      <div class="btn-row"><button class="btn-back" onclick="back(1)">← Назад</button><button class="btn-next" id="btn2" onclick="go(3)" disabled>Далі →</button></div>
+    </div>
+
+    <!-- Q3: Доказова база (СОР з національністю) -->
+    <div class="step" id="step3">
+      <div class="q-num">Питання 03 / 07</div>
+      <div class="q-title">Чи є у вас свідоцтва про народження батьків або дідусів/бабусь, де вказана національність (румунська/болгарська)?</div>
+      <div class="q-hint">Це найсильніший доказ для спрощеної процедури</div>
+      <div class="options">
+        <button class="opt" onclick="pick(this,'documents_evidence','yes_sorp')" data-step="3"><div class="opt-radio"></div><span class="opt-icon">📜</span><div class="opt-body"><div class="opt-main">Так, є СОР із зазначеною національністю</div><div class="opt-sub">Прямий доказ</div></div><span class="opt-tag">✅ Сильна база</span></button>
+        <button class="opt" onclick="pick(this,'documents_evidence','yes_other')" data-step="3"><div class="opt-radio"></div><span class="opt-icon">📁</span><div class="opt-body"><div class="opt-main">Є інші документи (метрики, архівні довідки)</div></div></button>
+        <button class="opt" onclick="pick(this,'documents_evidence','no')" data-step="3"><div class="opt-radio"></div><span class="opt-icon">🔍</span><div class="opt-body"><div class="opt-main">Ні, потрібен пошук</div></div><span class="opt-tag">Повний супровід</span></button>
+      </div>
+      <div class="btn-row"><button class="btn-back" onclick="back(2)">← Назад</button><button class="btn-next" id="btn3" onclick="go(4)" disabled>Далі →</button></div>
+    </div>
+
+    <!-- Q4: Історія спроб -->
+    <div class="step" id="step4">
+      <div class="q-num">Питання 04 / 07</div>
+      <div class="q-title">Ви вже намагалися займатися оформленням громадянства ЄС раніше?</div>
+      <div class="q-hint">Важливо для розуміння історії звернень</div>
+      <div class="options">
+        <button class="opt" onclick="pick(this,'experience','first')" data-step="4"><div class="opt-radio"></div><span class="opt-icon">🆕</span><div class="opt-body"><div class="opt-main">Ні, це вперше</div></div></button>
+        <button class="opt" onclick="pick(this,'experience','stopped')" data-step="4"><div class="opt-radio"></div><span class="opt-icon">📂</span><div class="opt-body"><div class="opt-main">Так, збирав документи, але залишив</div><div class="opt-sub">Потрібна допомога довести до кінця</div></div><span class="opt-tag">Під ключ</span></button>
+        <button class="opt" onclick="pick(this,'experience','refused')" data-step="4"><div class="opt-radio"></div><span class="opt-icon">⚠️</span><div class="opt-body"><div class="opt-main">Так, отримав відмову / запит на додаткові документи</div></div><span class="opt-tag">🔥 Гарячий клієнт</span></button>
+      </div>
+      <div class="btn-row"><button class="btn-back" onclick="back(3)">← Назад</button><button class="btn-next" id="btn4" onclick="go(5)" disabled>Далі →</button></div>
+    </div>
+
+    <!-- Q5: Наявність документів зараз -->
+    <div class="step" id="step5">
+      <div class="q-num">Питання 05 / 07</div>
+      <div class="q-title">Які документи у вас вже є на руках?</div>
+      <div class="q-hint">Допоможе оцінити обсяг роботи</div>
+      <div class="options">
+        <button class="opt" onclick="pick(this,'documents_status','full')" data-step="5"><div class="opt-radio"></div><span class="opt-icon">📚</span><div class="opt-body"><div class="opt-main">Повний архів</div><div class="opt-sub">Метрики, свідоцтва, архівні довідки</div></div></button>
+        <button class="opt" onclick="pick(this,'documents_status','birth')" data-step="5"><div class="opt-radio"></div><span class="opt-icon">📄</span><div class="opt-body"><div class="opt-main">Тільки моє свідоцтво про народження</div></div></button>
+        <button class="opt" onclick="pick(this,'documents_status','nothing')" data-step="5"><div class="opt-radio"></div><span class="opt-icon">🔍</span><div class="opt-body"><div class="opt-main">Нічого немає, потрібно шукати з нуля</div></div><span class="opt-tag">Повний супровід</span></button>
+      </div>
+      <div class="btn-row"><button class="btn-back" onclick="back(4)">← Назад</button><button class="btn-next" id="btn5" onclick="go(6)" disabled>Далі →</button></div>
+    </div>
+
+    <!-- Q6: Юридична чистота -->
+    <div class="step" id="step6">
+      <div class="q-num">Питання 06 / 07</div>
+      <div class="q-title">Чи маєте ви не погашені судимості або депортації з країн ЄС?</div>
+      <div class="q-hint">Юридичний фільтр</div>
+      <div class="options">
+        <button class="opt" onclick="pick(this,'criminal','no')" data-step="6"><div class="opt-radio"></div><span class="opt-icon">✅</span><div class="opt-body"><div class="opt-main">Ні</div></div></button>
+        <button class="opt" onclick="pick(this,'criminal','yes')" data-step="6"><div class="opt-radio"></div><span class="opt-icon">⚠️</span><div class="opt-body"><div class="opt-main">Так</div></div><span class="opt-tag">🔴 Високий ризик</span></button>
+      </div>
+      <div class="btn-row"><button class="btn-back" onclick="back(5)">← Назад</button><button class="btn-next" id="btn6" onclick="go(7)" disabled>Далі →</button></div>
+    </div>
+
+    <!-- Q7: Формат співпраці -->
+    <div class="step" id="step7">
+      <div class="q-num">Питання 07 / 07</div>
+      <div class="q-title">Який формат співпраці вам ближчий?</div>
+      <div class="q-hint">Допоможе запропонувати відповідний пакет послуг</div>
+      <div class="options">
+        <button class="opt" onclick="pick(this,'service_format','self')" data-step="7"><div class="opt-radio"></div><span class="opt-icon">📖</span><div class="opt-body"><div class="opt-main">Тільки консультації та перевірка документів</div><div class="opt-sub">Основну роботу роблю сам</div></div></button>
+        <button class="opt" onclick="pick(this,'service_format','vip')" data-step="7"><div class="opt-radio"></div><span class="opt-icon">💎</span><div class="opt-body"><div class="opt-main">Повна підтримка «під ключ» (включно з пошуком документів в архівах)</div><div class="opt-sub">Хочу доручити все експертам</div></div><span class="opt-tag">🔥 VIP клієнт</span></button>
+      </div>
+      <div class="btn-row"><button class="btn-back" onclick="back(6)">← Назад</button><button class="btn-next" id="btn7" onclick="go(8)" disabled>Далі →</button></div>
+    </div>
+
+    <!-- Q8: Терміновість -->
+    <div class="step" id="step8">
+      <div class="q-num">Питання 08 / 07</div>
+      <div class="q-title">Як швидко ви плануєте розпочати процес?</div>
+      <div class="q-hint">Визначає пріоритетність обробки заявки</div>
+      <div class="options">
+        <button class="opt" onclick="pick(this,'urgency','now')" data-step="8"><div class="opt-radio"></div><span class="opt-icon">🔥</span><div class="opt-body"><div class="opt-main">Прямо зараз</div><div class="opt-sub">Готовий до початку</div></div><span class="opt-tag">Високий пріоритет</span></button>
+        <button class="opt" onclick="pick(this,'urgency','soon')" data-step="8"><div class="opt-radio"></div><span class="opt-icon">📅</span><div class="opt-body"><div class="opt-main">Протягом 2–3 місяців</div></div></button>
+        <button class="opt" onclick="pick(this,'urgency','browse')" data-step="8"><div class="opt-radio"></div><span class="opt-icon">🔍</span><div class="opt-body"><div class="opt-main">Просто придивляюся</div><div class="opt-sub">Збираю інформацію</div></div></button>
+      </div>
+      <div class="btn-row"><button class="btn-back" onclick="back(7)">← Назад</button><button class="btn-next" id="btn8" onclick="go(9)" disabled>Далі →</button></div>
+    </div>
+
+    <!-- Spinner -->
+    <div class="spinner-screen" id="stepSpinner">
+      <div class="spinner"></div>
+      <div class="spinner-title">Аналізуємо ваші відповіді</div>
+      <div class="spinner-sub">Штучний інтелект формує персональний план легалізації<br>під ваш запит</div>
+    </div>
+
+    <!-- Contact -->
+    <div class="step" id="step9">
+      <div class="q-num">Останній крок</div>
+      <div class="q-title">Куди надіслати персональний план?</div>
+      <div class="q-hint">Наш експерт зв'яжеться з вами найближчим часом</div>
+
+      <div class="field-group">
+        <label class="field-label">Ім'я *</label>
+        <input class="field-input" type="text" id="nameInput" placeholder="напр. Олександр" oninput="checkContact()">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Телефон / WhatsApp *</label>
+        <input class="field-input" type="tel" id="phoneInput" placeholder="+48 00 000 00 00" oninput="checkContact()">
+        <div id="phoneError" style="color:var(--gold);font-size:12px;margin-top:5px;display:none;">Введіть правильний номер телефону (9 цифр)</div>
+      </div>
+
+      <div class="rodo-wrap">
+        <input type="checkbox" id="rodoCheck" onchange="checkContact()">
+        <label class="rodo-label" for="rodoCheck">
+          Я погоджуюсь на обробку моїх персональних даних для отримання консультації. Дані не передаються третім особам.
+        </label>
+      </div>
+
+      <div class="urgency">
+        ⚡ Кількість місць на безкоштовний аналіз обмежена — не відкладайте!
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-back" onclick="back(8)">← Назад</button>
+        <button class="btn-next btn-submit" id="btnSubmit" onclick="submit()" disabled>
+          🚀 Отримати результат аналізу
+        </button>
+      </div>
+
+      <div class="foot-note">🔒 Ваші дані захищені. Жодного спаму.</div>
+    </div>
+
+    <!-- Success -->
+    <div class="step" id="stepOK">
+      <div class="success">
+        <div class="success-emo">📄</div>
+        <div class="success-title"><span class="red" id="okName"></span>, ваш персональний план легалізації майже готовий</div>
+        <div class="success-body">
+          Наш експерт зв'яжеться з вами найближчим часом, щоб обговорити оптимальний шлях отримання громадянства ЄС.
+        </div>
+        <div class="success-timer">⏱ Зв'язок протягом 15–30 хвилин</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const answers = {};
+  let cur = 1;
+  const TOTAL = 8;
+  let isSubmitting = false;
+
+  // Маска для телефона
+  const phoneInput = document.getElementById('phoneInput');
+  if (phoneInput) {
+    IMask(phoneInput, {
+      mask: '+{48} 00 000 00 00',
+      lazy: false
+    });
+  }
+
+  function pick(el, key, val) {
+    const step = el.getAttribute('data-step');
+    document.querySelectorAll(`[data-step="${step}"]`).forEach(o => o.classList.remove('sel'));
+    el.classList.add('sel');
+    answers[key] = val;
+    const btn = document.getElementById('btn' + step);
+    if (btn) btn.disabled = false;
+  }
+
+  function go(to) {
+    const currentStep = document.querySelector('.step.active');
+    if (currentStep) currentStep.classList.remove('active');
+    
+    if (to === 9) {
+      const spinner = document.getElementById('stepSpinner');
+      spinner.classList.add('active');
+      document.getElementById('progWrap').style.display = 'none';
+      setTimeout(() => {
+        spinner.classList.remove('active');
+        document.getElementById('step9').classList.add('active');
+      }, 2500);
+      cur = to;
+      updateProg();
+      return;
+    }
+    
+    const nextStep = document.getElementById('step' + to);
+    if (nextStep) nextStep.classList.add('active');
+    cur = to;
+    updateProg();
+  }
+
+  function back(to) {
+    const currentStep = document.querySelector('.step.active');
+    if (currentStep) currentStep.classList.remove('active');
+    const prevStep = document.getElementById('step' + to);
+    if (prevStep) prevStep.classList.add('active');
+    cur = to;
+    updateProg();
+  }
+
+  function updateProg() {
+    const progWrap = document.getElementById('progWrap');
+    if (cur > TOTAL) {
+      progWrap.style.display = 'none';
+      return;
+    }
+    progWrap.style.display = 'block';
+    const pct = Math.round((cur / TOTAL) * 100);
+    document.getElementById('progFill').style.width = pct + '%';
+    document.getElementById('progPct').textContent = pct + '%';
+    if (cur <= TOTAL) {
+      document.getElementById('progLabel').textContent = `Питання ${cur} з ${TOTAL}`;
+    }
+  }
+
+  function checkContact() {
+    const n = document.getElementById('nameInput').value.trim();
+    const p = document.getElementById('phoneInput').value.trim();
+    const rodo = document.getElementById('rodoCheck').checked;
+    const phoneError = document.getElementById('phoneError');
+
+    const phoneClean = p.replace(/[\s\-\(\)\+]/g, '');
+    const phoneValid = phoneClean.length === 11 && phoneClean.startsWith('48');
+
+    if (p.length > 5 && !phoneValid) {
+      phoneError.style.display = 'block';
+    } else {
+      phoneError.style.display = 'none';
+    }
+
+    document.getElementById('btnSubmit').disabled = !(n.length > 1 && phoneValid && rodo);
+  }
+
+  async function submit() {
+    if (isSubmitting) return;
+    isSubmitting = true;
+    
+    const name = document.getElementById('nameInput').value.trim();
+    const phone = document.getElementById('phoneInput').value.trim();
+    const btnSubmit = document.getElementById('btnSubmit');
+
+    btnSubmit.disabled = true;
+    btnSubmit.textContent = "Надсилання...";
+
+    const labels = {
+      direction: { ro: 'Румунія', bg: 'Болгарія', dunno: 'Потрібна порада' },
+      roots: { yes_docs: 'Є документи', yes_nodocs: 'Знаю, але документів немає', check: 'Потрібно перевіряти' },
+      documents_evidence: { yes_sorp: 'СОР з національністю', yes_other: 'Інші документи', no: 'Немає, потрібен пошук' },
+      experience: { first: 'Вперше', stopped: 'Збирав, але залишив', refused: 'Відмова / дозапит' },
+      documents_status: { full: 'Повний архів', birth: 'Тільки свідоцтво про народження', nothing: 'Нічого немає' },
+      criminal: { no: 'Ні', yes: 'Так' },
+      service_format: { self: 'Консультації', vip: 'Повний супровід під ключ' },
+      urgency: { now: 'Прямо зараз', soon: '2–3 місяці', browse: 'Придивляюся' }
+    };
+
+    const now = new Date();
+    const timestamp = now.toLocaleDateString('uk-UA') + ' ' + now.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+
+    const leadData = {
+      zrodlo: "Квіз — Громадянство ЄС",
+      imie: name,
+      telefon: phone,
+      napryamok: labels.direction[answers.direction] || "Не вибрано",
+      korennya: labels.roots[answers.roots] || "Не вибрано",
+      dokazova_baza: labels.documents_evidence[answers.documents_evidence] || "Не вибрано",
+      istoriya_sprob: labels.experience[answers.experience] || "Не вибрано",
+      nayavnist_dokumentiv: labels.documents_status[answers.documents_status] || "Не вибрано",
+      sudimist: labels.criminal[answers.criminal] || "Не вибрано",
+      format_spivpraci: labels.service_format[answers.service_format] || "Не вибрано",
+      terminovist: labels.urgency[answers.urgency] || "Не вибрано",
+      czas_zgloszenia: timestamp
+    };
+
+    // НОВИЙ WEBHOOK URL
+    const webhookUrl = "https://hook.eu1.make.com/03ge8mspv6j46jl1q7cmtkb9azoszoxp";
+
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(leadData)
+      });
+
+      if (response.ok) {
+        document.getElementById('okName').textContent = name;
+        document.getElementById('step9').classList.remove('active');
+        document.getElementById('stepOK').classList.add('active');
+        document.getElementById('progWrap').style.display = 'none';
+      } else {
+        throw new Error('Помилка сервера');
+      }
+        } catch (error) {
+      alert("Ошибка: " + error.message); // Это покажет текст ошибки вместо общей фразы
+      console.log(error);
+      btnSubmit.disabled = false;
+      btnSubmit.textContent = "🚀 Отримати результат аналізу";
+    }
+
+  }
+</script>
+</body>
+</html>
