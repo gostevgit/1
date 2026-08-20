@@ -187,12 +187,12 @@ class ListenTranslateService : Service() {
         )
 
         return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(R.drawable.ic_stat_translate)
             .setContentTitle("HeyGlass Listen Translate")
             .setContentText(status)
             .setContentIntent(openPi)
             .setOngoing(true)
-            .addAction(Notification.Action.Builder(android.R.drawable.ic_media_pause, "Stop", stopPi).build())
+            .addAction(Notification.Action.Builder(R.drawable.ic_stat_translate, "Stop", stopPi).build())
             .build()
     }
 
