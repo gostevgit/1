@@ -250,12 +250,12 @@ class GeminiLiveTranslateClient(
         if (AcousticEchoCanceler.isAvailable()) {
             echoCanceler = runCatching { AcousticEchoCanceler.create(audioRecord.audioSessionId) }
                 .getOrNull()
-                ?.also { it.enabled = true }
+                ?.also { it.setEnabled(true) }
         }
         if (NoiseSuppressor.isAvailable()) {
             noiseSuppressor = runCatching { NoiseSuppressor.create(audioRecord.audioSessionId) }
                 .getOrNull()
-                ?.also { it.enabled = true }
+                ?.also { it.setEnabled(true) }
         }
 
         audioTrack.play()
