@@ -34,6 +34,7 @@ class GeminiLiveTranslateClient(
     private val targetLanguageCode: String,
     private val inputDevice: AudioDeviceInfo?,
     private val outputDevice: AudioDeviceInfo?,
+    private val continuousMode: Boolean,
     private val callback: Callback,
 ) {
 
@@ -53,6 +54,7 @@ class GeminiLiveTranslateClient(
     private val active = AtomicBoolean(false)
     private val audioStarted = AtomicBoolean(false)
     private val firstServerContentSeen = AtomicBoolean(false)
+    private val socketWriteFailed = AtomicBoolean(false)
     private val sentChunks = AtomicLong(0)
     private val playbackQueue = LinkedBlockingQueue<ByteArray>(100)
 
@@ -69,6 +71,7 @@ class GeminiLiveTranslateClient(
         require(apiKey.isNotBlank()) { "Gemini API key is empty" }
         sentChunks.set(0)
         firstServerContentSeen.set(false)
+        socketWriteFailed.set(false)
         callback.onStatus("Connecting to Gemini 3.5 Live Translate…")
 
         val request = Request.Builder()
@@ -91,9 +94,14 @@ class GeminiLiveTranslateClient(
                 // The v1beta Live Translate preview has been observed to accept a valid
                 // setup but not always surface setupComplete to raw WebSocket clients.
                 // WebSocket frames are ordered, so setup is queued before realtime audio.
-                // Start streaming immediately instead of blocking forever on setupComplete.
                 if (audioStarted.compareAndSet(false, true)) {
-                    callback.onStatus("Streaming glasses audio · waiting for Gemini…")
+                    callback.onStatus(
+                        if (continuousMode) {
+                            "Streaming glasses audio · CONTINUOUS mode"
+                        } else {
+                            "Streaming glasses audio · standard mode"
+                        },
+                    )
                     startAudio()
                 }
             }
@@ -103,7 +111,6 @@ class GeminiLiveTranslateClient(
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                // Defensive support in case a backend rollout returns JSON in a binary WS frame.
                 handleMessage(bytes.utf8())
             }
 
@@ -132,12 +139,11 @@ class GeminiLiveTranslateClient(
         playbackQueue.clear()
         audioStarted.set(false)
         firstServerContentSeen.set(false)
+        socketWriteFailed.set(false)
         callback.onStatus("Stopped")
     }
 
     private fun sendSetup(webSocket: WebSocket): Boolean {
-        // Raw v1beta runtime currently expects transcription fields at setup level,
-        // while translationConfig remains inside generationConfig.
         val generationConfig = JSONObject()
             .put("responseModalities", JSONArray().put("AUDIO"))
             .put(
@@ -153,8 +159,18 @@ class GeminiLiveTranslateClient(
             .put("inputAudioTranscription", JSONObject())
             .put("outputAudioTranscription", JSONObject())
 
+        // Gemini defaults to START_OF_ACTIVITY_INTERRUPTS (barge-in). That is useful
+        // for assistants, but it cuts off interpretation when the source keeps talking.
+        // Continuous mode explicitly keeps the model response playing.
+        if (continuousMode) {
+            setup.put(
+                "realtimeInputConfig",
+                JSONObject().put("activityHandling", "NO_INTERRUPTION"),
+            )
+        }
+
         val envelope = JSONObject().put("setup", setup).toString()
-        Log.d(TAG, "Sending Live Translate setup for target=$targetLanguageCode")
+        Log.d(TAG, "Sending Live Translate setup target=$targetLanguageCode continuous=$continuousMode")
         return webSocket.send(envelope)
     }
 
@@ -165,7 +181,9 @@ class GeminiLiveTranslateClient(
         }
 
         if (message.has("setupComplete")) {
-            callback.onStatus("Listening · Gemini setup confirmed · target=$targetLanguageCode")
+            callback.onStatus(
+                "Listening · target=$targetLanguageCode · continuous=${if (continuousMode) "ON" else "OFF"}",
+            )
         }
 
         message.optJSONObject("error")?.let { error ->
@@ -174,7 +192,9 @@ class GeminiLiveTranslateClient(
 
         val serverContent = message.optJSONObject("serverContent") ?: return
         if (firstServerContentSeen.compareAndSet(false, true)) {
-            callback.onStatus("Gemini is receiving audio · translating to $targetLanguageCode")
+            callback.onStatus(
+                "Gemini receiving audio · continuous=${if (continuousMode) "ON" else "OFF"}",
+            )
         }
 
         serverContent.optJSONObject("inputTranscription")
@@ -188,11 +208,15 @@ class GeminiLiveTranslateClient(
             ?.let(callback::onOutputTranscript)
 
         if (serverContent.optBoolean("interrupted", false)) {
-            playbackQueue.clear()
-            player?.let {
-                runCatching { it.pause() }
-                runCatching { it.flush() }
-                runCatching { it.play() }
+            if (continuousMode) {
+                Log.d(TAG, "Ignoring interrupted signal in continuous mode")
+            } else {
+                playbackQueue.clear()
+                player?.let {
+                    runCatching { it.pause() }
+                    runCatching { it.flush() }
+                    runCatching { it.play() }
+                }
             }
         }
 
@@ -310,7 +334,9 @@ class GeminiLiveTranslateClient(
             val buffer = ByteArray(INPUT_CHUNK_BYTES)
             try {
                 audioRecord.startRecording()
-                callback.onStatus("Streaming glasses mic → Gemini · target=$targetLanguageCode")
+                callback.onStatus(
+                    "Streaming glasses mic → Gemini · ${if (continuousMode) "CONTINUOUS" else "STANDARD"}",
+                )
                 while (active.get()) {
                     val count = audioRecord.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
                     if (count > 0) {
@@ -334,13 +360,17 @@ class GeminiLiveTranslateClient(
         val payload = JSONObject().put("realtimeInput", JSONObject().put("audio", audio))
         val sent = socket?.send(payload.toString()) == true
         if (!sent) {
-            callback.onError("Gemini socket rejected an audio chunk")
+            if (socketWriteFailed.compareAndSet(false, true)) {
+                callback.onError("Gemini WebSocket stopped accepting audio; waiting for close reason")
+            }
             return
         }
 
         val chunks = sentChunks.incrementAndGet()
         if (chunks == 20L) {
-            callback.onStatus("Audio streaming OK · 2.0 s sent · speak now")
+            callback.onStatus(
+                "Audio streaming OK · ${if (continuousMode) "CONTINUOUS" else "STANDARD"} · speak now",
+            )
         } else if (chunks == 100L && !firstServerContentSeen.get()) {
             callback.onStatus("Audio streaming OK · 10 s sent · waiting for Gemini response")
         }
