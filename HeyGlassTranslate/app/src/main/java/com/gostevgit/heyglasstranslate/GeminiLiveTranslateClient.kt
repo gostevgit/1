@@ -111,10 +111,12 @@ class GeminiLiveTranslateClient(
     }
 
     private fun sendSetup(webSocket: WebSocket) {
+        // Runtime v1beta BidiGenerateContent schema expects transcription config
+        // at BidiGenerateContentSetup level, not inside GenerationConfig.
+        // The dedicated Live Translate guide currently shows a conflicting example;
+        // the server rejects that shape with close code 1007.
         val generationConfig = JSONObject()
             .put("responseModalities", JSONArray().put("AUDIO"))
-            .put("inputAudioTranscription", JSONObject())
-            .put("outputAudioTranscription", JSONObject())
             .put(
                 "translationConfig",
                 JSONObject()
@@ -125,6 +127,8 @@ class GeminiLiveTranslateClient(
         val setup = JSONObject()
             .put("model", MODEL)
             .put("generationConfig", generationConfig)
+            .put("inputAudioTranscription", JSONObject())
+            .put("outputAudioTranscription", JSONObject())
 
         val ok = webSocket.send(JSONObject().put("setup", setup).toString())
         if (!ok) callback.onError("Could not send Gemini setup message")
