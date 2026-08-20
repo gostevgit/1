@@ -4,6 +4,16 @@ import android.content.Context
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 
+private fun AudioDeviceInfo.typeLabel(): String = when (type) {
+    AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "BT_SCO"
+    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "BT_A2DP"
+    AudioDeviceInfo.TYPE_BLE_HEADSET -> "BLE_HEADSET"
+    AudioDeviceInfo.TYPE_BLE_SPEAKER -> "BLE_SPEAKER"
+    AudioDeviceInfo.TYPE_BUILTIN_MIC -> "PHONE_MIC"
+    AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "PHONE_SPEAKER"
+    else -> type.toString()
+}
+
 /**
  * Routes Android communication audio through a Bluetooth headset/glasses device.
  *
@@ -21,9 +31,9 @@ class BluetoothAudioRouter(context: Context) {
             get() = buildString {
                 append(communicationDevice.productName ?: "Bluetooth device")
                 append(" · input=")
-                append(inputDevice?.typeName() ?: "system")
+                append(inputDevice?.typeLabel() ?: "system")
                 append(" · output=")
-                append(outputDevice?.typeName() ?: "system")
+                append(outputDevice?.typeLabel() ?: "system")
             }
     }
 
@@ -100,15 +110,5 @@ class BluetoothAudioRouter(context: Context) {
 
     @Suppress("MissingPermission")
     private fun AudioDeviceInfo.debugName(): String =
-        "${productName ?: "?"}:${typeName()}#${id}"
-
-    private fun AudioDeviceInfo.typeName(): String = when (type) {
-        AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "BT_SCO"
-        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "BT_A2DP"
-        AudioDeviceInfo.TYPE_BLE_HEADSET -> "BLE_HEADSET"
-        AudioDeviceInfo.TYPE_BLE_SPEAKER -> "BLE_SPEAKER"
-        AudioDeviceInfo.TYPE_BUILTIN_MIC -> "PHONE_MIC"
-        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "PHONE_SPEAKER"
-        else -> type.toString()
-    }
+        "${productName ?: "?"}:${typeLabel()}#${id}"
 }
