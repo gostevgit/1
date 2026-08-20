@@ -15,16 +15,18 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Minimal audio-to-audio client for Gemini 3.5 Live Translate.
  *
- * Input:  raw little-endian PCM16 mono @ 16 kHz, sent in 100 ms chunks.
+ * Input: raw little-endian PCM16 mono @ 16 kHz, sent in 100 ms chunks.
  * Output: raw little-endian PCM16 mono @ 24 kHz.
  */
 class GeminiLiveTranslateClient(
@@ -50,6 +52,8 @@ class GeminiLiveTranslateClient(
 
     private val active = AtomicBoolean(false)
     private val audioStarted = AtomicBoolean(false)
+    private val firstServerContentSeen = AtomicBoolean(false)
+    private val sentChunks = AtomicLong(0)
     private val playbackQueue = LinkedBlockingQueue<ByteArray>(100)
 
     private var socket: WebSocket? = null
@@ -63,6 +67,8 @@ class GeminiLiveTranslateClient(
     fun start() {
         if (!active.compareAndSet(false, true)) return
         require(apiKey.isNotBlank()) { "Gemini API key is empty" }
+        sentChunks.set(0)
+        firstServerContentSeen.set(false)
         callback.onStatus("Connecting to Gemini 3.5 Live Translate…")
 
         val request = Request.Builder()
@@ -75,12 +81,30 @@ class GeminiLiveTranslateClient(
                     webSocket.close(1000, "stopped")
                     return
                 }
-                callback.onStatus("Connected. Configuring translation…")
-                sendSetup(webSocket)
+
+                callback.onStatus("Connected · sending translation setup…")
+                if (!sendSetup(webSocket)) {
+                    callback.onError("Could not send Gemini setup message")
+                    return
+                }
+
+                // The v1beta Live Translate preview has been observed to accept a valid
+                // setup but not always surface setupComplete to raw WebSocket clients.
+                // WebSocket frames are ordered, so setup is queued before realtime audio.
+                // Start streaming immediately instead of blocking forever on setupComplete.
+                if (audioStarted.compareAndSet(false, true)) {
+                    callback.onStatus("Streaming glasses audio · waiting for Gemini…")
+                    startAudio()
+                }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 handleMessage(text)
+            }
+
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                // Defensive support in case a backend rollout returns JSON in a binary WS frame.
+                handleMessage(bytes.utf8())
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -107,14 +131,13 @@ class GeminiLiveTranslateClient(
         stopAudio()
         playbackQueue.clear()
         audioStarted.set(false)
+        firstServerContentSeen.set(false)
         callback.onStatus("Stopped")
     }
 
-    private fun sendSetup(webSocket: WebSocket) {
-        // Runtime v1beta BidiGenerateContent schema expects transcription config
-        // at BidiGenerateContentSetup level, not inside GenerationConfig.
-        // The dedicated Live Translate guide currently shows a conflicting example;
-        // the server rejects that shape with close code 1007.
+    private fun sendSetup(webSocket: WebSocket): Boolean {
+        // Raw v1beta runtime currently expects transcription fields at setup level,
+        // while translationConfig remains inside generationConfig.
         val generationConfig = JSONObject()
             .put("responseModalities", JSONArray().put("AUDIO"))
             .put(
@@ -130,19 +153,19 @@ class GeminiLiveTranslateClient(
             .put("inputAudioTranscription", JSONObject())
             .put("outputAudioTranscription", JSONObject())
 
-        val ok = webSocket.send(JSONObject().put("setup", setup).toString())
-        if (!ok) callback.onError("Could not send Gemini setup message")
+        val envelope = JSONObject().put("setup", setup).toString()
+        Log.d(TAG, "Sending Live Translate setup for target=$targetLanguageCode")
+        return webSocket.send(envelope)
     }
 
     private fun handleMessage(raw: String) {
         val message = runCatching { JSONObject(raw) }.getOrElse {
-            Log.w(TAG, "Ignoring malformed Gemini response")
+            Log.w(TAG, "Ignoring malformed Gemini response: ${raw.take(120)}")
             return
         }
 
-        if (message.has("setupComplete") && audioStarted.compareAndSet(false, true)) {
-            callback.onStatus("Listening · translating to $targetLanguageCode")
-            startAudio()
+        if (message.has("setupComplete")) {
+            callback.onStatus("Listening · Gemini setup confirmed · target=$targetLanguageCode")
         }
 
         message.optJSONObject("error")?.let { error ->
@@ -150,6 +173,9 @@ class GeminiLiveTranslateClient(
         }
 
         val serverContent = message.optJSONObject("serverContent") ?: return
+        if (firstServerContentSeen.compareAndSet(false, true)) {
+            callback.onStatus("Gemini is receiving audio · translating to $targetLanguageCode")
+        }
 
         serverContent.optJSONObject("inputTranscription")
             ?.optString("text")
@@ -172,10 +198,9 @@ class GeminiLiveTranslateClient(
 
         val parts = serverContent.optJSONObject("modelTurn")?.optJSONArray("parts") ?: return
         for (index in 0 until parts.length()) {
-            val encoded = parts.optJSONObject(index)
-                ?.optJSONObject("inlineData")
-                ?.optString("data")
-                .orEmpty()
+            val part = parts.optJSONObject(index) ?: continue
+            val inlineData = part.optJSONObject("inlineData") ?: part.optJSONObject("inline_data")
+            val encoded = inlineData?.optString("data").orEmpty()
             if (encoded.isNotBlank()) {
                 runCatching { Base64.decode(encoded, Base64.DEFAULT) }
                     .getOrNull()
@@ -268,11 +293,14 @@ class GeminiLiveTranslateClient(
             while (active.get()) {
                 try {
                     val bytes = playbackQueue.take()
-                    if (active.get()) audioTrack.write(bytes, 0, bytes.size, AudioTrack.WRITE_BLOCKING)
+                    if (active.get()) {
+                        audioTrack.write(bytes, 0, bytes.size, AudioTrack.WRITE_BLOCKING)
+                    }
                 } catch (_: InterruptedException) {
                     break
                 } catch (t: Throwable) {
                     Log.w(TAG, "Audio playback failed", t)
+                    if (active.get()) callback.onError("Translated audio playback failed: ${t.message ?: "unknown error"}")
                     break
                 }
             }
@@ -282,9 +310,12 @@ class GeminiLiveTranslateClient(
             val buffer = ByteArray(INPUT_CHUNK_BYTES)
             try {
                 audioRecord.startRecording()
+                callback.onStatus("Streaming glasses mic → Gemini · target=$targetLanguageCode")
                 while (active.get()) {
                     val count = audioRecord.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
-                    if (count > 0) sendPcm(if (count == buffer.size) buffer else buffer.copyOf(count))
+                    if (count > 0) {
+                        sendPcm(if (count == buffer.size) buffer else buffer.copyOf(count))
+                    }
                 }
             } catch (t: Throwable) {
                 if (active.get()) {
@@ -301,7 +332,18 @@ class GeminiLiveTranslateClient(
             .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
             .put("mimeType", "audio/pcm;rate=$INPUT_SAMPLE_RATE")
         val payload = JSONObject().put("realtimeInput", JSONObject().put("audio", audio))
-        socket?.send(payload.toString())
+        val sent = socket?.send(payload.toString()) == true
+        if (!sent) {
+            callback.onError("Gemini socket rejected an audio chunk")
+            return
+        }
+
+        val chunks = sentChunks.incrementAndGet()
+        if (chunks == 20L) {
+            callback.onStatus("Audio streaming OK · 2.0 s sent · speak now")
+        } else if (chunks == 100L && !firstServerContentSeen.get()) {
+            callback.onStatus("Audio streaming OK · 10 s sent · waiting for Gemini response")
+        }
     }
 
     private fun stopAudio() {
