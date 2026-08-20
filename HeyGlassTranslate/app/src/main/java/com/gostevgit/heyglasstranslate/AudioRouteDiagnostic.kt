@@ -1,6 +1,7 @@
 package com.gostevgit.heyglasstranslate
 
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
@@ -13,14 +14,21 @@ import kotlin.math.sqrt
 /** Simple physical test: play a short tone in the glasses, then measure the glasses mic. */
 object AudioRouteDiagnostic {
 
+    private data class MicResult(
+        val device: String,
+        val dbFs: Double,
+    )
+
     @Suppress("MissingPermission")
     fun run(route: BluetoothAudioRouter.Route, status: (String) -> Unit): Result<String> = runCatching {
-        status("Audio route: ${route.description}")
-        playTone(route, status)
-        measureMicrophone(route, status)
+        status("Requested audio route: ${route.description}")
+        val actualOutput = playTone(route, status)
+        val mic = measureMicrophone(route, status)
+        "Audio test OK · output=$actualOutput · input=${mic.device} · mic %.1f dBFS".format(mic.dbFs)
     }
 
-    private fun playTone(route: BluetoothAudioRouter.Route, status: (String) -> Unit) {
+    @Suppress("MissingPermission")
+    private fun playTone(route: BluetoothAudioRouter.Route, status: (String) -> Unit): String {
         val sampleRate = 24_000
         val durationMs = 350
         val sampleCount = sampleRate * durationMs / 1000
@@ -54,14 +62,23 @@ object AudioRouteDiagnostic {
 
         route.outputDevice?.let { track.setPreferredDevice(it) }
         status("Speaker test: you should hear a short beep in the glasses")
-        track.write(pcm, 0, pcm.size)
-        track.play()
-        Thread.sleep((durationMs + 150).toLong())
-        track.release()
+
+        var actualOutput = route.outputDevice.deviceLabel()
+        try {
+            track.write(pcm, 0, pcm.size)
+            track.play()
+            Thread.sleep(80)
+            actualOutput = track.routedDevice.deviceLabel()
+            status("Actual output: $actualOutput")
+            Thread.sleep((durationMs + 100 - 80).toLong())
+        } finally {
+            track.release()
+        }
+        return actualOutput
     }
 
     @Suppress("MissingPermission")
-    private fun measureMicrophone(route: BluetoothAudioRouter.Route, status: (String) -> Unit): String {
+    private fun measureMicrophone(route: BluetoothAudioRouter.Route, status: (String) -> Unit): MicResult {
         val sampleRate = 16_000
         val minBuffer = AudioRecord.getMinBufferSize(
             sampleRate,
@@ -88,6 +105,7 @@ object AudioRouteDiagnostic {
         val buffer = ShortArray(1_600)
         var sumSquares = 0.0
         var samples = 0L
+        var actualInput = route.inputDevice.deviceLabel()
         val deadline = System.currentTimeMillis() + 2_000L
 
         try {
@@ -95,6 +113,7 @@ object AudioRouteDiagnostic {
             while (System.currentTimeMillis() < deadline) {
                 val count = recorder.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
                 if (count > 0) {
+                    actualInput = recorder.routedDevice.deviceLabel()
                     for (i in 0 until count) {
                         val v = buffer[i].toDouble() / Short.MAX_VALUE
                         sumSquares += v * v
@@ -110,6 +129,13 @@ object AudioRouteDiagnostic {
         check(samples > 0) { "No samples received from microphone" }
         val rms = sqrt(sumSquares / samples)
         val dbFs = if (rms > 0.0) 20.0 * log10(rms) else -120.0
-        return "Bluetooth audio test OK · microphone level %.1f dBFS".format(dbFs)
+        status("Actual input: $actualInput")
+        return MicResult(actualInput, dbFs)
+    }
+
+    @Suppress("MissingPermission")
+    private fun AudioDeviceInfo?.deviceLabel(): String {
+        if (this == null) return "system/default"
+        return "${productName ?: "?"}(type=$type,id=$id)"
     }
 }
