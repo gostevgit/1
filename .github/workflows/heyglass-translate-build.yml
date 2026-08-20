@@ -7,6 +7,10 @@ on:
     paths:
       - 'HeyGlassTranslate/**'
       - '.github/workflows/heyglass-translate-build.yml'
+  pull_request:
+    paths:
+      - 'HeyGlassTranslate/**'
+      - '.github/workflows/heyglass-translate-build.yml'
 
 jobs:
   build:
