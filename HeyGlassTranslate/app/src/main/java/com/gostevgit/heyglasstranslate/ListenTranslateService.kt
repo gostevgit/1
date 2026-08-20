@@ -67,7 +67,8 @@ class ListenTranslateService : Service() {
             null
         }
         if (route == null) {
-            reportError("Bluetooth headset/glasses microphone not found. Connect the glasses in Android Bluetooth settings first.")
+            val devices = runCatching { router.describeAvailableDevices() }.getOrDefault("device list unavailable")
+            reportError("Bluetooth headset/glasses microphone not found · $devices")
             return
         }
 
@@ -107,7 +108,8 @@ class ListenTranslateService : Service() {
         worker.execute {
             val route = runCatching { router.routeToGlasses() }.getOrNull()
             if (route == null) {
-                reportError("Bluetooth headset/glasses audio route not found")
+                val devices = runCatching { router.describeAvailableDevices() }.getOrDefault("device list unavailable")
+                reportError("Bluetooth headset/glasses audio route not found · $devices")
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return@execute
