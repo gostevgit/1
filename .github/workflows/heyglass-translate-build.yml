@@ -2,6 +2,12 @@ name: Build HeyGlass Translate
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - listen-translate
+    paths:
+      - 'HeyGlassTranslate/**'
+      - '.github/workflows/heyglass-translate-build.yml'
   pull_request:
     paths:
       - 'HeyGlassTranslate/**'
