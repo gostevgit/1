@@ -211,7 +211,7 @@ class MainActivity : Activity() {
 
     private fun requiredPermissions(): List<String> = buildList {
         add(Manifest.permission.RECORD_AUDIO)
-        add(Manifest.permission.BLUETOOTH_CONNECT)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) add(Manifest.permission.BLUETOOTH_CONNECT)
         if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
     }
 
