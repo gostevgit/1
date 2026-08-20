@@ -34,6 +34,7 @@ class ListenTranslateService : Service() {
             ACTION_START -> startTranslation(
                 apiKey = intent.getStringExtra(EXTRA_API_KEY).orEmpty(),
                 targetLanguage = intent.getStringExtra(EXTRA_TARGET_LANGUAGE).orEmpty().ifBlank { "ru" },
+                continuousMode = intent.getBooleanExtra(EXTRA_CONTINUOUS_MODE, false),
             )
             ACTION_TEST_AUDIO -> runAudioTest()
             ACTION_STOP -> stopEverything()
@@ -52,7 +53,7 @@ class ListenTranslateService : Service() {
     }
 
     @Suppress("MissingPermission")
-    private fun startTranslation(apiKey: String, targetLanguage: String) {
+    private fun startTranslation(apiKey: String, targetLanguage: String, continuousMode: Boolean) {
         if (apiKey.isBlank()) {
             reportError("Enter a Gemini API key first")
             return
@@ -73,13 +74,14 @@ class ListenTranslateService : Service() {
         }
 
         acquireWakeLock()
-        reportStatus("Glasses routed · ${route.description}")
+        reportStatus("Glasses routed · ${route.description} · continuous=${if (continuousMode) "ON" else "OFF"}")
 
         client = GeminiLiveTranslateClient(
             apiKey = apiKey,
             targetLanguageCode = targetLanguage,
             inputDevice = route.inputDevice,
             outputDevice = route.outputDevice,
+            continuousMode = continuousMode,
             callback = object : GeminiLiveTranslateClient.Callback {
                 override fun onStatus(message: String) {
                     reportStatus(message)
@@ -220,6 +222,7 @@ class ListenTranslateService : Service() {
 
         const val EXTRA_API_KEY = "api_key"
         const val EXTRA_TARGET_LANGUAGE = "target_language"
+        const val EXTRA_CONTINUOUS_MODE = "continuous_mode"
         const val EXTRA_STATUS = "status"
         const val EXTRA_ERROR = "error"
         const val EXTRA_INPUT_TRANSCRIPT = "input_transcript"
