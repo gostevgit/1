@@ -190,7 +190,7 @@ class ListenTranslateService : Service() {
             .setContentText(status)
             .setContentIntent(openPi)
             .setOngoing(true)
-            .addAction(Notification.Action.Builder(null, "Stop", stopPi).build())
+            .addAction(Notification.Action.Builder(android.R.drawable.ic_media_pause, "Stop", stopPi).build())
             .build()
     }
 
