@@ -11,6 +11,7 @@ import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
+import android.text.method.PasswordTransformationMethod
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -89,6 +90,7 @@ class MainActivity : Activity() {
         apiKeyInput = EditText(this).apply {
             hint = "AIza…"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            transformationMethod = PasswordTransformationMethod.getInstance()
             setText(preferences.getString(PREF_API_KEY, ""))
             isSingleLine = true
         }
