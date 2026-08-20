@@ -26,10 +26,12 @@ class MainActivity : Activity() {
 
     private lateinit var apiKeyInput: EditText
     private lateinit var languageSpinner: Spinner
+    private lateinit var continuousModeButton: Button
     private lateinit var statusView: TextView
     private lateinit var inputTranscriptView: TextView
     private lateinit var outputTranscriptView: TextView
 
+    private var continuousMode = false
     private val preferences by lazy { getSharedPreferences("heyglass_translate", Context.MODE_PRIVATE) }
 
     private val languages = listOf(
@@ -87,11 +89,11 @@ class MainActivity : Activity() {
         })
 
         root.addView(label("Gemini API key"))
+        val savedKey = preferences.getString(PREF_API_KEY, "").orEmpty()
         apiKeyInput = EditText(this).apply {
-            hint = "AIza…"
+            hint = if (savedKey.isBlank()) "AIza…" else "Saved key ••••••••"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             transformationMethod = PasswordTransformationMethod.getInstance()
-            setText(preferences.getString(PREF_API_KEY, ""))
             isSingleLine = true
         }
         root.addView(apiKeyInput, matchWrap())
@@ -107,12 +109,28 @@ class MainActivity : Activity() {
         languageSpinner.setSelection(languages.indexOfFirst { it.code == savedLanguage }.coerceAtLeast(0))
         root.addView(languageSpinner, matchWrap())
 
+        continuousMode = preferences.getBoolean(PREF_CONTINUOUS_MODE, false)
+        continuousModeButton = Button(this).apply {
+            updateContinuousModeButton(this)
+            setOnClickListener {
+                continuousMode = !continuousMode
+                preferences.edit().putBoolean(PREF_CONTINUOUS_MODE, continuousMode).apply()
+                updateContinuousModeButton(this)
+                statusView.text = if (continuousMode) {
+                    "Continuous mode ON · press START to apply"
+                } else {
+                    "Continuous mode OFF · press START to apply"
+                }
+            }
+        }
+        root.addView(continuousModeButton, topMargin(14))
+
         root.addView(Button(this).apply {
             text = "TEST GLASSES AUDIO"
             setOnClickListener {
                 if (ensurePermissions()) startAudioTest()
             }
-        }, topMargin(18))
+        }, topMargin(10))
 
         root.addView(Button(this).apply {
             text = "START LISTEN TRANSLATE"
@@ -152,7 +170,7 @@ class MainActivity : Activity() {
         root.addView(outputTranscriptView, matchWrap())
 
         root.addView(TextView(this).apply {
-            text = "MVP note: the API key is stored only in this app's private preferences. After the hardware test passes, the next security step is short-lived Gemini ephemeral tokens."
+            text = "Continuous mode keeps the current translated speech playing when more source speech starts. The API key is stored only in this app's private preferences."
             textSize = 12f
             setPadding(0, dp(20), 0, 0)
         })
@@ -160,23 +178,41 @@ class MainActivity : Activity() {
         setContentView(ScrollView(this).apply { addView(root) })
     }
 
+    private fun updateContinuousModeButton(button: Button) {
+        button.text = if (continuousMode) {
+            "CONTINUOUS MODE: ON"
+        } else {
+            "CONTINUOUS MODE: OFF"
+        }
+    }
+
     private fun startTranslation() {
-        val apiKey = apiKeyInput.text.toString().trim()
+        val enteredKey = apiKeyInput.text.toString().trim()
+        val savedKey = preferences.getString(PREF_API_KEY, "").orEmpty()
+        val apiKey = enteredKey.ifBlank { savedKey }
         if (apiKey.isBlank()) {
             Toast.makeText(this, "Enter your Gemini API key", Toast.LENGTH_SHORT).show()
             return
         }
+
         val language = languages[languageSpinner.selectedItemPosition]
-        preferences.edit()
-            .putString(PREF_API_KEY, apiKey)
-            .putString(PREF_LANGUAGE, language.code)
-            .apply()
+        preferences.edit().apply {
+            if (enteredKey.isNotBlank()) putString(PREF_API_KEY, enteredKey)
+            putString(PREF_LANGUAGE, language.code)
+            putBoolean(PREF_CONTINUOUS_MODE, continuousMode)
+        }.apply()
+
+        if (enteredKey.isNotBlank()) {
+            apiKeyInput.text.clear()
+            apiKeyInput.hint = "Saved key ••••••••"
+        }
 
         statusView.text = "Starting…"
         val intent = Intent(this, ListenTranslateService::class.java)
             .setAction(ListenTranslateService.ACTION_START)
             .putExtra(ListenTranslateService.EXTRA_API_KEY, apiKey)
             .putExtra(ListenTranslateService.EXTRA_TARGET_LANGUAGE, language.code)
+            .putExtra(ListenTranslateService.EXTRA_CONTINUOUS_MODE, continuousMode)
         startForegroundService(intent)
     }
 
@@ -249,5 +285,6 @@ class MainActivity : Activity() {
         private const val REQUEST_PERMISSIONS = 41
         private const val PREF_API_KEY = "gemini_api_key"
         private const val PREF_LANGUAGE = "target_language"
+        private const val PREF_CONTINUOUS_MODE = "continuous_mode"
     }
 }
