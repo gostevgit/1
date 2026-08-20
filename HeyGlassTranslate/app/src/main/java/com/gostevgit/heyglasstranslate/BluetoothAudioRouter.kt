@@ -31,8 +31,9 @@ class BluetoothAudioRouter(context: Context) {
 
     @Suppress("MissingPermission")
     fun routeToGlasses(): Route? {
-        val communicationDevice = audioManager.availableCommunicationDevices.firstOrNull(::isBluetoothCommunicationDevice)
-            ?: return null
+        val candidates = audioManager.availableCommunicationDevices
+            .filter(::isBluetoothCommunicationDevice)
+        val communicationDevice = candidates.maxByOrNull(::glassesPreferenceScore) ?: return null
 
         val previousMode = audioManager.mode
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -47,9 +48,9 @@ class BluetoothAudioRouter(context: Context) {
         val outputs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
 
         val input = inputs.firstOrNull { it.id == communicationDevice.id }
-            ?: inputs.firstOrNull(::isBluetoothMic)
+            ?: inputs.filter(::isBluetoothMic).maxByOrNull(::glassesPreferenceScore)
         val output = outputs.firstOrNull { it.id == communicationDevice.id }
-            ?: outputs.firstOrNull(::isBluetoothSpeechOutput)
+            ?: outputs.filter(::isBluetoothSpeechOutput).maxByOrNull(::glassesPreferenceScore)
 
         return Route(
             communicationDevice = communicationDevice,
@@ -58,9 +59,29 @@ class BluetoothAudioRouter(context: Context) {
         )
     }
 
+    @Suppress("MissingPermission")
+    fun describeAvailableDevices(): String {
+        val communication = audioManager.availableCommunicationDevices.joinToString { it.debugName() }
+        val inputs = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).joinToString { it.debugName() }
+        val outputs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).joinToString { it.debugName() }
+        return "comm=[$communication] · inputs=[$inputs] · outputs=[$outputs]"
+    }
+
     fun clear() {
         runCatching { audioManager.clearCommunicationDevice() }
         audioManager.mode = AudioManager.MODE_NORMAL
+    }
+
+    @Suppress("MissingPermission")
+    private fun glassesPreferenceScore(device: AudioDeviceInfo): Int {
+        val name = device.productName?.toString()?.lowercase().orEmpty()
+        var score = 0
+        if ("hey" in name) score += 100
+        if ("cyan" in name) score += 100
+        if ("glass" in name) score += 100
+        if (device.type == AudioDeviceInfo.TYPE_BLE_HEADSET) score += 10
+        if (device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) score += 5
+        return score
     }
 
     private fun isBluetoothCommunicationDevice(device: AudioDeviceInfo): Boolean =
@@ -77,11 +98,17 @@ class BluetoothAudioRouter(context: Context) {
                 device.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
             )
 
+    @Suppress("MissingPermission")
+    private fun AudioDeviceInfo.debugName(): String =
+        "${productName ?: "?"}:${typeName()}#${id}"
+
     private fun AudioDeviceInfo.typeName(): String = when (type) {
         AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "BT_SCO"
         AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "BT_A2DP"
         AudioDeviceInfo.TYPE_BLE_HEADSET -> "BLE_HEADSET"
         AudioDeviceInfo.TYPE_BLE_SPEAKER -> "BLE_SPEAKER"
+        AudioDeviceInfo.TYPE_BUILTIN_MIC -> "PHONE_MIC"
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "PHONE_SPEAKER"
         else -> type.toString()
     }
 }
