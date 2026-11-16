@@ -53,3 +53,78 @@ jobs:
           name: heyglass-translate-debug
           path: HeyGlassTranslate/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+
+  ota_probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe AM02 latest OTA URL
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, urllib.error
+
+          URL = "https://www.qlifesnap.com/glasses/app-update/last-ota"
+          TOKEN = "15ef6eb5403406c1da0dc4a4defa2ea1"
+          versions = [
+              "AM02_1.00.21_260101",
+              "AM02_1.00.20_251231",
+              "AM02_1.00.19_251201",
+              "AM02_1.00.10_250101",
+              "AM02_1.00.01_240101",
+              "AM02_1.00.21",
+              "1.00.21_260101",
+              "1.00.20_251231",
+              "1.00.10_250101",
+              "1.00.21",
+              "1.00.10",
+              "0.99.99",
+          ]
+          out = []
+          for rom in versions:
+              payload = {
+                  "appId": 4,
+                  "uid": 0,
+                  "hardwareVersion": "AM02_V1.0",
+                  "romVersion": rom,
+                  "os": 1,
+                  "mac": "",
+                  "country": "US",
+                  "dev": 2,
+              }
+              req = urllib.request.Request(
+                  URL,
+                  data=json.dumps(payload).encode(),
+                  headers={"Content-Type":"application/json","token":TOKEN},
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as resp:
+                      body = resp.read().decode("utf-8","replace")
+                      status = resp.status
+              except urllib.error.HTTPError as e:
+                  status = e.code
+                  body = e.read().decode("utf-8","replace")
+              except Exception as e:
+                  status = 0
+                  body = f"{type(e).__name__}: {e}"
+              item = {"romVersion": rom, "http": status, "body": body}
+              out.append(item)
+              print(json.dumps(item, ensure_ascii=False))
+              try:
+                  obj = json.loads(body)
+                  if obj.get("retCode") == 0:
+                      print("FOUND_UPDATE_URL", json.dumps(obj.get("data"), ensure_ascii=False))
+                      break
+              except Exception:
+                  pass
+          with open("am02-ota-probe.json","w",encoding="utf-8") as f:
+              json.dump(out,f,ensure_ascii=False,indent=2)
+          PY
+
+      - name: Upload OTA probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: am02-ota-probe
+          path: am02-ota-probe.json
+          if-no-files-found: error
