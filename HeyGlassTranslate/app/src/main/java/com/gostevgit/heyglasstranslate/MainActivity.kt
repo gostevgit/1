@@ -5,6 +5,7 @@ import android.app.Activity
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -24,6 +25,7 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import java.util.UUID
 
 class MainActivity : Activity() {
 
@@ -159,6 +161,13 @@ class MainActivity : Activity() {
         }, topMargin(10))
 
         root.addView(Button(this).apply {
+            text = "PROBE SPP (READ ONLY)"
+            setOnClickListener {
+                if (ensurePermissions()) probeSppReadOnly()
+            }
+        }, topMargin(10))
+
+        root.addView(Button(this).apply {
             text = "START LISTEN TRANSLATE"
             setOnClickListener {
                 if (ensurePermissions()) startTranslation()
@@ -287,6 +296,100 @@ class MainActivity : Activity() {
     }
 
     @Suppress("MissingPermission")
+    private fun probeSppReadOnly() {
+        val manager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter = manager.adapter ?: run {
+            classicBluetoothView.text = "Bluetooth adapter unavailable"
+            return
+        }
+        val device = adapter.bondedDevices.orEmpty()
+            .maxByOrNull { classicDeviceScore(it) }
+            ?.takeIf { classicDeviceScore(it) > 0 }
+
+        if (device == null) {
+            classicBluetoothView.text = "No bonded M02/HeyCyan-like device found"
+            return
+        }
+
+        statusView.text = "Opening SPP 0x1101 in read-only mode…"
+        classicBluetoothView.text = "SPP read-only probe\nDevice: ${device.name ?: device.address}\nNo bytes will be written."
+
+        Thread {
+            var socket: BluetoothSocket? = null
+            var watchdog: Thread? = null
+            try {
+                adapter.cancelDiscovery()
+                socket = device.createRfcommSocketToServiceRecord(UUID.fromString(SPP_UUID))
+
+                val socketForWatchdog = socket
+                watchdog = Thread {
+                    try {
+                        Thread.sleep(SPP_CONNECT_TIMEOUT_MS)
+                        runCatching { socketForWatchdog.close() }
+                    } catch (_: InterruptedException) {
+                        // Normal: connection/probe completed before timeout.
+                    }
+                }.apply { start() }
+
+                socket.connect()
+                watchdog.interrupt()
+
+                val input = socket.inputStream
+                val captured = ArrayList<Byte>()
+                val deadline = System.currentTimeMillis() + SPP_PASSIVE_READ_MS
+
+                while (System.currentTimeMillis() < deadline && captured.size < SPP_CAPTURE_LIMIT) {
+                    val available = runCatching { input.available() }.getOrDefault(0)
+                    if (available > 0) {
+                        val count = minOf(available, 256, SPP_CAPTURE_LIMIT - captured.size)
+                        val buffer = ByteArray(count)
+                        val read = input.read(buffer)
+                        if (read > 0) {
+                            repeat(read) { captured.add(buffer[it]) }
+                        }
+                    } else {
+                        Thread.sleep(75)
+                    }
+                }
+
+                val hex = captured.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+                runOnUiThread {
+                    statusView.text = "SPP read-only probe complete"
+                    classicBluetoothView.text = buildString {
+                        append("SPP / RFCOMM 0x1101: CONNECTED")
+                        append("\nDevice: ").append(device.name ?: device.address)
+                        append("\nBytes written: 0")
+                        append("\nPassive listen: ").append(SPP_PASSIVE_READ_MS).append(" ms")
+                        append("\nBytes received: ").append(captured.size)
+                        if (captured.isNotEmpty()) {
+                            append("\nRX hex: ").append(hex)
+                        } else {
+                            append("\nRX: no unsolicited data")
+                            append("\nThis is compatible with an RCSP-style channel that waits for a client handshake.")
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                watchdog?.interrupt()
+                runOnUiThread {
+                    statusView.text = "SPP probe failed"
+                    classicBluetoothView.text = buildString {
+                        append("SPP / RFCOMM 0x1101 probe failed")
+                        append("\nBytes written: 0")
+                        append("\n")
+                        append(t.javaClass.simpleName)
+                        append(": ")
+                        append(t.message ?: "no message")
+                    }
+                }
+            } finally {
+                watchdog?.interrupt()
+                runCatching { socket?.close() }
+            }
+        }.start()
+    }
+
+    @Suppress("MissingPermission")
     private fun classicDeviceScore(device: BluetoothDevice): Int {
         val name = device.name?.lowercase().orEmpty()
         var score = 0
@@ -409,5 +512,8 @@ class MainActivity : Activity() {
         private const val PREF_LANGUAGE = "target_language"
         private const val PREF_CONTINUOUS_MODE = "continuous_mode"
         private const val SPP_UUID = "00001101-0000-1000-8000-00805f9b34fb"
+        private const val SPP_CONNECT_TIMEOUT_MS = 8000L
+        private const val SPP_PASSIVE_READ_MS = 3000L
+        private const val SPP_CAPTURE_LIMIT = 4096
     }
 }
