@@ -2,6 +2,9 @@ package com.gostevgit.heyglasstranslate
 
 import android.Manifest
 import android.app.Activity
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -28,6 +31,7 @@ class MainActivity : Activity() {
     private lateinit var languageSpinner: Spinner
     private lateinit var continuousModeButton: Button
     private lateinit var statusView: TextView
+    private lateinit var classicBluetoothView: TextView
     private lateinit var inputTranscriptView: TextView
     private lateinit var outputTranscriptView: TextView
 
@@ -44,6 +48,15 @@ class MainActivity : Activity() {
         Language("Español", "es"),
         Language("Français", "fr"),
     )
+
+    private val uuidReceiver = object : BroadcastReceiver() {
+        @Suppress("DEPRECATION")
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != BluetoothDevice.ACTION_UUID) return
+            val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+            showClassicBluetoothResult(device, "SDP complete")
+        }
+    }
 
     private val stateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -63,11 +76,13 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         buildUi()
         registerStateReceiver()
+        registerUuidReceiver()
         requestRuntimePermissionsIfNeeded()
     }
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(stateReceiver) }
+        runCatching { unregisterReceiver(uuidReceiver) }
         super.onDestroy()
     }
 
@@ -133,6 +148,13 @@ class MainActivity : Activity() {
         }, topMargin(10))
 
         root.addView(Button(this).apply {
+            text = "INSPECT CLASSIC / RCSP"
+            setOnClickListener {
+                if (ensurePermissions()) inspectClassicBluetooth()
+            }
+        }, topMargin(10))
+
+        root.addView(Button(this).apply {
             text = "START LISTEN TRANSLATE"
             setOnClickListener {
                 if (ensurePermissions()) startTranslation()
@@ -152,6 +174,15 @@ class MainActivity : Activity() {
             setBackgroundColor(0x11000000)
         }
         root.addView(statusView, matchWrap())
+
+        root.addView(label("Classic Bluetooth / RCSP diagnostic"))
+        classicBluetoothView = TextView(this).apply {
+            text = "Not inspected"
+            textSize = 13f
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setTextIsSelectable(true)
+        }
+        root.addView(classicBluetoothView, matchWrap())
 
         root.addView(label("Heard (diagnostic transcript)"))
         inputTranscriptView = TextView(this).apply {
@@ -184,6 +215,83 @@ class MainActivity : Activity() {
         } else {
             "CONTINUOUS MODE: OFF"
         }
+    }
+
+    @Suppress("MissingPermission")
+    private fun inspectClassicBluetooth() {
+        val manager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter: BluetoothAdapter = manager.adapter ?: run {
+            classicBluetoothView.text = "Bluetooth adapter unavailable"
+            return
+        }
+        if (!adapter.isEnabled) {
+            classicBluetoothView.text = "Bluetooth is disabled"
+            return
+        }
+
+        val bonded = adapter.bondedDevices.orEmpty()
+        val device = bonded.maxByOrNull { classicDeviceScore(it) }
+        if (device == null || classicDeviceScore(device) <= 0) {
+            classicBluetoothView.text = buildString {
+                append("No bonded HeyCyan/M02-like device found.")
+                if (bonded.isNotEmpty()) {
+                    append("\nBonded devices: ")
+                    append(bonded.joinToString { it.name ?: it.address })
+                }
+            }
+            return
+        }
+
+        showClassicBluetoothResult(device, "Cached UUIDs")
+        val requested = runCatching { device.fetchUuidsWithSdp() }.getOrDefault(false)
+        statusView.text = if (requested) {
+            "Classic SDP requested · waiting for UUID result…"
+        } else {
+            "Classic SDP request could not be started · showing cached UUIDs"
+        }
+    }
+
+    @Suppress("MissingPermission")
+    private fun showClassicBluetoothResult(device: BluetoothDevice, phase: String) {
+        val uuids = device.uuids?.map { it.uuid.toString().lowercase() }.orEmpty()
+        val spp = uuids.any { it == SPP_UUID }
+        classicBluetoothView.text = buildString {
+            append(phase)
+            append("\nDevice: ")
+            append(device.name ?: "unknown")
+            append("\nAddress: ")
+            append(device.address)
+            append("\nClassic type: ")
+            append(
+                when (device.type) {
+                    BluetoothDevice.DEVICE_TYPE_CLASSIC -> "CLASSIC"
+                    BluetoothDevice.DEVICE_TYPE_DUAL -> "DUAL (Classic + LE)"
+                    BluetoothDevice.DEVICE_TYPE_LE -> "LE only"
+                    else -> "unknown"
+                },
+            )
+            append("\nSPP / RFCOMM 0x1101: ")
+            append(if (spp) "YES" else "not advertised")
+            append("\nUUIDs:")
+            if (uuids.isEmpty()) {
+                append("\n— none cached yet")
+            } else {
+                uuids.forEach { append("\n").append(it) }
+            }
+            append("\n\nThis test is read-only; it does not write commands to the glasses.")
+        }
+    }
+
+    @Suppress("MissingPermission")
+    private fun classicDeviceScore(device: BluetoothDevice): Int {
+        val name = device.name?.lowercase().orEmpty()
+        var score = 0
+        if (name.startsWith("m02")) score += 500
+        if ("hey" in name) score += 200
+        if ("cyan" in name) score += 200
+        if ("glass" in name) score += 100
+        if (device.type == BluetoothDevice.DEVICE_TYPE_DUAL) score += 25
+        return score
     }
 
     private fun startTranslation() {
@@ -253,6 +361,16 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    private fun registerUuidReceiver() {
+        val filter = IntentFilter(BluetoothDevice.ACTION_UUID)
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(uuidReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(uuidReceiver, filter)
+        }
+    }
+
     private fun registerStateReceiver() {
         val filter = IntentFilter(ListenTranslateService.ACTION_STATE)
         if (Build.VERSION.SDK_INT >= 33) {
@@ -286,5 +404,6 @@ class MainActivity : Activity() {
         private const val PREF_API_KEY = "gemini_api_key"
         private const val PREF_LANGUAGE = "target_language"
         private const val PREF_CONTINUOUS_MODE = "continuous_mode"
+        private const val SPP_UUID = "00001101-0000-1000-8000-00805f9b34fb"
     }
 }
