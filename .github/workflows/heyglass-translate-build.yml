@@ -171,3 +171,58 @@ jobs:
             am02-analysis.json
             am02-strings-head.txt
           if-no-files-found: error
+
+
+  ota_route_probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe AM02 OTA routing variants
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, urllib.error, itertools, time
+          URL="https://www.qlifesnap.com/glasses/app-update/last-ota"
+          TOKEN="15ef6eb5403406c1da0dc4a4defa2ea1"
+          rom="AM02_1.00.21_260101"
+          macs=["", "00:11:22:33:44:55", "73:73:59:95:5A:8A"]
+          out=[]
+          for appid,dev,mac in itertools.product((1,4),(1,2),macs):
+              payload={
+                  "appId":appid,"uid":0,"hardwareVersion":"AM02_V1.0",
+                  "romVersion":rom,"os":1,"mac":mac,"country":"US","dev":dev
+              }
+              req=urllib.request.Request(
+                  URL,data=json.dumps(payload).encode(),
+                  headers={"Content-Type":"application/json","token":TOKEN},method="POST"
+              )
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as resp:
+                      body=resp.read().decode("utf-8","replace"); http=resp.status
+              except urllib.error.HTTPError as e:
+                  http=e.code; body=e.read().decode("utf-8","replace")
+              except Exception as e:
+                  http=0; body=f"{type(e).__name__}: {e}"
+              try: obj=json.loads(body)
+              except Exception: obj={}
+              data=obj.get("data") or {}
+              row={
+                  "request":{"appId":appid,"dev":dev,"mac":mac or "<empty>"},
+                  "http":http,"retCode":obj.get("retCode"),
+                  "version":data.get("version"),
+                  "downloadUrl":data.get("downloadUrl"),
+                  "specifyMacUpgrade":data.get("specifyMacUpgrade"),
+                  "updateDesc":data.get("updateDesc"),
+              }
+              out.append(row)
+              print(json.dumps(row,ensure_ascii=False))
+              time.sleep(0.15)
+          with open("am02-ota-routing.json","w",encoding="utf-8") as f:
+              json.dump(out,f,ensure_ascii=False,indent=2)
+          PY
+
+      - name: Upload OTA routing probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: am02-ota-routing
+          path: am02-ota-routing.json
+          if-no-files-found: error
