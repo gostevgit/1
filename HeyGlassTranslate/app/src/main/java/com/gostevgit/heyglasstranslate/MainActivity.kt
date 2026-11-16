@@ -210,6 +210,20 @@ class MainActivity : Activity() {
         }, topMargin(10))
 
         root.addView(Button(this).apply {
+            text = "SAVE + REBOOT → GoPro 1234"
+            setOnClickListener {
+                if (ensurePermissions()) setJieLiBluetoothNameAndReboot("GoPro 1234")
+            }
+        }, topMargin(10))
+
+        root.addView(Button(this).apply {
+            text = "SAVE + REBOOT → M02_A94B"
+            setOnClickListener {
+                if (ensurePermissions()) setJieLiBluetoothNameAndReboot("M02_A94B")
+            }
+        }, topMargin(10))
+
+        root.addView(Button(this).apply {
             text = "START LISTEN TRANSLATE"
             setOnClickListener {
                 if (ensurePermissions()) startTranslation()
@@ -1149,6 +1163,210 @@ class MainActivity : Activity() {
                     },
                     if (success) "JieLi name command acknowledged" else "JieLi response received",
                 )
+            }
+        }
+
+        gattRef = device.connectGatt(this, false, callback, BluetoothDevice.TRANSPORT_LE)
+    }
+
+    @Suppress("MissingPermission", "DEPRECATION")
+    private fun setJieLiBluetoothNameAndReboot(newName: String) {
+        if (newName.toByteArray(Charsets.UTF_8).size > 20) {
+            classicBluetoothView.text = "Name too long for JieLi RCSP (max 20 bytes)"
+            return
+        }
+
+        val manager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter = manager.adapter ?: run {
+            classicBluetoothView.text = "Bluetooth adapter unavailable"
+            return
+        }
+        val device = adapter.bondedDevices.orEmpty()
+            .maxByOrNull { classicDeviceScore(it) }
+            ?.takeIf { classicDeviceScore(it) > 0 }
+        if (device == null) {
+            classicBluetoothView.text = "No bonded M02/GoPro test device found"
+            return
+        }
+
+        statusView.text = "Writing name, then applying with RCSP reboot…"
+        classicBluetoothView.text = "Target: $newName\nSequence: SET_ADV 0xC0 → REBOOT 0xE7"
+
+        val done = AtomicBoolean(false)
+        val rebootSent = AtomicBoolean(false)
+        var gattRef: BluetoothGatt? = null
+        var writeRef: BluetoothGattCharacteristic? = null
+
+        fun finish(msg: String, status: String) {
+            if (!done.compareAndSet(false, true)) return
+            runOnUiThread {
+                statusView.text = status
+                classicBluetoothView.text = msg
+            }
+            runCatching { gattRef?.disconnect() }
+            runCatching { gattRef?.close() }
+        }
+
+        fun rcspFrame(cmd: Int, payload: ByteArray = byteArrayOf()): ByteArray {
+            val frame = ByteArray(8 + payload.size)
+            frame[0] = 0xFE.toByte()
+            frame[1] = 0xDC.toByte()
+            frame[2] = 0xBA.toByte()
+            frame[3] = 0xC0.toByte()
+            frame[4] = cmd.toByte()
+            frame[5] = ((payload.size ushr 8) and 0xFF).toByte()
+            frame[6] = (payload.size and 0xFF).toByte()
+            payload.copyInto(frame, 7)
+            frame[frame.lastIndex] = 0xEF.toByte()
+            return frame
+        }
+
+        val callback = object : BluetoothGattCallback() {
+            override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+                if (rebootSent.get() && newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    finish(
+                        buildString {
+                            append("RCSP reboot triggered after name write.")
+                            append("\nTarget: ").append(newName)
+                            append("\nThe disconnect is expected.")
+                            append("\nAfter the glasses come back, check nRF Scanner.")
+                        },
+                        "Name saved/apply sequence completed",
+                    )
+                    return
+                }
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    finish("BLE error status=$status state=$newState", "Save + reboot failed")
+                    return
+                }
+                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    gatt.discoverServices()
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED && !done.get()) {
+                    finish("Disconnected before reboot command", "Save + reboot failed")
+                }
+            }
+
+            override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    finish("Service discovery failed: $status", "Save + reboot failed")
+                    return
+                }
+                val service = gatt.getService(UUID.fromString(JIELI_RCSP_SERVICE_UUID))
+                val writeChar = service?.getCharacteristic(UUID.fromString(JIELI_RCSP_WRITE_UUID))
+                val notifyChar = service?.getCharacteristic(UUID.fromString(JIELI_RCSP_NOTIFY_UUID))
+                if (service == null || writeChar == null || notifyChar == null) {
+                    finish("AE30 / AE01 / AE02 not available", "Save + reboot unavailable")
+                    return
+                }
+                writeRef = writeChar
+                if (!gatt.setCharacteristicNotification(notifyChar, true)) {
+                    finish("Could not enable AE02 notifications", "Save + reboot failed")
+                    return
+                }
+                val cccd = notifyChar.getDescriptor(UUID.fromString(CCCD_UUID))
+                if (cccd == null) {
+                    finish("AE02 CCCD missing", "Save + reboot failed")
+                    return
+                }
+                cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                if (!gatt.writeDescriptor(cccd)) {
+                    finish("Could not write AE02 CCCD", "Save + reboot failed")
+                }
+            }
+
+            override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                if (descriptor.uuid.toString().lowercase() != CCCD_UUID || done.get()) return
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    finish("AE02 CCCD write failed: $status", "Save + reboot failed")
+                    return
+                }
+
+                val nameBytes = newName.toByteArray(Charsets.UTF_8)
+                val attr = ByteArray(nameBytes.size + 2)
+                attr[0] = (nameBytes.size + 1).toByte()
+                attr[1] = 0x01
+                nameBytes.copyInto(attr, 2)
+                val frame = rcspFrame(0xC0, attr)
+
+                val writeChar = writeRef ?: run {
+                    finish("AE01 write characteristic missing", "Save + reboot failed")
+                    return
+                }
+                writeChar.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                writeChar.value = frame
+                if (!gatt.writeCharacteristic(writeChar)) {
+                    finish("SET_ADV write could not be started", "Save + reboot failed")
+                    return
+                }
+
+                runOnUiThread {
+                    classicBluetoothView.text = buildString {
+                        append("SET_ADV sent")
+                        append("\nTarget: ").append(newName)
+                        append("\nWaiting for 0xC0 acknowledgement before 0xE7 reboot…")
+                    }
+                }
+
+                Thread {
+                    Thread.sleep(7000)
+                    if (!done.get() && !rebootSent.get()) {
+                        finish(
+                            "No SET_ADV acknowledgement; reboot was NOT sent.",
+                            "Name write not confirmed",
+                        )
+                    }
+                }.start()
+            }
+
+            override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+                if (characteristic.uuid.toString().lowercase() != JIELI_RCSP_NOTIFY_UUID || done.get()) return
+                val data = characteristic.value ?: byteArrayOf()
+                val hex = data.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+
+                val isSetAdvAck = data.size >= 8 &&
+                    (data[0].toInt() and 0xFF) == 0xFE &&
+                    (data[1].toInt() and 0xFF) == 0xDC &&
+                    (data[2].toInt() and 0xFF) == 0xBA &&
+                    (data[4].toInt() and 0xFF) == 0xC0
+
+                if (isSetAdvAck && rebootSent.compareAndSet(false, true)) {
+                    val writeChar = writeRef
+                    if (writeChar == null) {
+                        finish("SET_ADV acknowledged, but AE01 disappeared", "Reboot step failed")
+                        return
+                    }
+                    val rebootFrame = rcspFrame(0xE7)
+                    writeChar.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                    writeChar.value = rebootFrame
+                    val started = gatt.writeCharacteristic(writeChar)
+                    runOnUiThread {
+                        classicBluetoothView.text = buildString {
+                            append("SET_ADV acknowledged")
+                            append("\nRX: ").append(hex)
+                            append("\nSending REBOOT/APPLY 0xE7…")
+                            append("\nTarget: ").append(newName)
+                        }
+                    }
+                    if (!started) {
+                        finish("0xE7 reboot write could not be started", "Reboot step failed")
+                        return
+                    }
+
+                    Thread {
+                        Thread.sleep(5000)
+                        if (!done.get()) {
+                            finish(
+                                buildString {
+                                    append("SET_ADV acknowledged and 0xE7 sent.")
+                                    append("\nTarget: ").append(newName)
+                                    append("\nNo disconnect was observed, but reboot command was transmitted.")
+                                    append("\nCheck nRF Scanner after power-cycle.")
+                                },
+                                "Save + reboot sequence sent",
+                            )
+                        }
+                    }.start()
+                }
             }
         }
 
