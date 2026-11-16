@@ -168,6 +168,13 @@ class MainActivity : Activity() {
         }, topMargin(10))
 
         root.addView(Button(this).apply {
+            text = "RCSP TARGET INFO (READ ONLY)"
+            setOnClickListener {
+                if (ensurePermissions()) probeRcspTargetInfo()
+            }
+        }, topMargin(10))
+
+        root.addView(Button(this).apply {
             text = "START LISTEN TRANSLATE"
             setOnClickListener {
                 if (ensurePermissions()) startTranslation()
@@ -390,6 +397,196 @@ class MainActivity : Activity() {
     }
 
     @Suppress("MissingPermission")
+    private fun probeRcspTargetInfo() {
+        val manager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter = manager.adapter ?: run {
+            classicBluetoothView.text = "Bluetooth adapter unavailable"
+            return
+        }
+        val device = adapter.bondedDevices.orEmpty()
+            .maxByOrNull { classicDeviceScore(it) }
+            ?.takeIf { classicDeviceScore(it) > 0 }
+
+        if (device == null) {
+            classicBluetoothView.text = "No bonded M02/HeyCyan-like device found"
+            return
+        }
+
+        statusView.text = "Sending read-only RCSP GetTargetInfo…"
+        classicBluetoothView.text = buildString {
+            append("RCSP GetTargetInfo probe")
+            append("\nDevice: ").append(device.name ?: device.address)
+            append("\nOperation: READ ONLY")
+            append("\nNo settings or firmware writes")
+        }
+
+        Thread {
+            var socket: BluetoothSocket? = null
+            var watchdog: Thread? = null
+            try {
+                adapter.cancelDiscovery()
+                socket = device.createRfcommSocketToServiceRecord(UUID.fromString(SPP_UUID))
+                val socketForWatchdog = socket
+                watchdog = Thread {
+                    try {
+                        Thread.sleep(SPP_CONNECT_TIMEOUT_MS)
+                        runCatching { socketForWatchdog.close() }
+                    } catch (_: InterruptedException) {
+                    }
+                }.apply { start() }
+
+                socket.connect()
+                watchdog.interrupt()
+
+                val seq = 0x01
+                val mask = RCSP_TARGET_MASK
+                val payload = byteArrayOf(
+                    seq.toByte(),
+                    ((mask ushr 24) and 0xFF).toByte(),
+                    ((mask ushr 16) and 0xFF).toByte(),
+                    ((mask ushr 8) and 0xFF).toByte(),
+                    (mask and 0xFF).toByte(),
+                    0x00,
+                )
+                val frame = ByteArray(8 + payload.size)
+                frame[0] = 0xFE.toByte()
+                frame[1] = 0xDC.toByte()
+                frame[2] = 0xBA.toByte()
+                frame[3] = 0xC0.toByte()
+                frame[4] = 0x03
+                frame[5] = ((payload.size ushr 8) and 0xFF).toByte()
+                frame[6] = (payload.size and 0xFF).toByte()
+                payload.copyInto(frame, destinationOffset = 7)
+                frame[frame.lastIndex] = 0xEF.toByte()
+
+                socket.outputStream.write(frame)
+                socket.outputStream.flush()
+
+                val input = socket.inputStream
+                val captured = ArrayList<Byte>()
+                val deadline = System.currentTimeMillis() + RCSP_RESPONSE_WAIT_MS
+                while (System.currentTimeMillis() < deadline && captured.size < RCSP_CAPTURE_LIMIT) {
+                    val available = runCatching { input.available() }.getOrDefault(0)
+                    if (available > 0) {
+                        val count = minOf(available, 512, RCSP_CAPTURE_LIMIT - captured.size)
+                        val buffer = ByteArray(count)
+                        val read = input.read(buffer)
+                        if (read > 0) repeat(read) { captured.add(buffer[it]) }
+                    } else {
+                        Thread.sleep(50)
+                    }
+                }
+
+                val txHex = frame.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+                val rxBytes = captured.toByteArray()
+                val rxHex = rxBytes.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+                val parsed = parseRcspResponse(rxBytes)
+
+                runOnUiThread {
+                    statusView.text = if (captured.isEmpty()) {
+                        "RCSP request sent · no response"
+                    } else {
+                        "RCSP response received"
+                    }
+                    classicBluetoothView.text = buildString {
+                        append("SPP / RFCOMM 0x1101: CONNECTED")
+                        append("\nRCSP command: GetTargetInfo (0x03)")
+                        append("\nRead-only mask: 0x").append(mask.toString(16).uppercase().padStart(8, '0'))
+                        append("\nTX: ").append(txHex)
+                        append("\nBytes received: ").append(rxBytes.size)
+                        if (rxBytes.isNotEmpty()) {
+                            append("\nRX: ").append(rxHex)
+                            append("\n").append(parsed)
+                        } else {
+                            append("\nRX: no response")
+                            append("\nLikely causes: RCSP authentication required, or SPP 0x1101 is not the RCSP transport.")
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                watchdog?.interrupt()
+                runOnUiThread {
+                    statusView.text = "RCSP probe failed"
+                    classicBluetoothView.text = buildString {
+                        append("RCSP GetTargetInfo failed")
+                        append("\nOperation was read-only.")
+                        append("\n")
+                        append(t.javaClass.simpleName)
+                        append(": ")
+                        append(t.message ?: "no message")
+                    }
+                }
+            } finally {
+                watchdog?.interrupt()
+                runCatching { socket?.close() }
+            }
+        }.start()
+    }
+
+    private fun parseRcspResponse(bytes: ByteArray): String {
+        if (bytes.size < 8) return "RCSP parse: response too short"
+        val head = byteArrayOf(0xFE.toByte(), 0xDC.toByte(), 0xBA.toByte())
+        var start = -1
+        for (i in 0..bytes.size - 3) {
+            if (bytes[i] == head[0] && bytes[i + 1] == head[1] && bytes[i + 2] == head[2]) {
+                start = i
+                break
+            }
+        }
+        if (start < 0 || start + 8 > bytes.size) return "RCSP parse: FE DC BA frame not found"
+
+        val flag = bytes[start + 3].toInt() and 0xFF
+        val cmd = bytes[start + 4].toInt() and 0xFF
+        val len = ((bytes[start + 5].toInt() and 0xFF) shl 8) or (bytes[start + 6].toInt() and 0xFF)
+        val total = 8 + len
+        if (start + total > bytes.size) return "RCSP parse: truncated frame cmd=0x%02X len=%d".format(cmd, len)
+        val tail = bytes[start + 7 + len].toInt() and 0xFF
+        val payload = bytes.copyOfRange(start + 7, start + 7 + len)
+
+        return buildString {
+            append("RCSP frame: flag=0x%02X cmd=0x%02X len=%d tail=0x%02X".format(flag, cmd, len, tail))
+            if (cmd == 0x03 && payload.size >= 2) {
+                val status = payload[0].toInt() and 0xFF
+                val seq = payload[1].toInt() and 0xFF
+                append("\nGetTargetInfo status=0x%02X seq=0x%02X".format(status, seq))
+                if (status == 0x00) {
+                    append("\nSUCCESS: target information returned")
+                    val tlv = payload.copyOfRange(2, payload.size)
+                    val decoded = decodeTargetInfoTlv(tlv)
+                    if (decoded.isNotBlank()) append("\n").append(decoded)
+                } else {
+                    append("\nDevice rejected/needs protocol authentication")
+                }
+            }
+        }
+    }
+
+    private fun decodeTargetInfoTlv(bytes: ByteArray): String {
+        val lines = ArrayList<String>()
+        var i = 0
+        while (i < bytes.size) {
+            val attrLen = bytes[i].toInt() and 0xFF
+            if (attrLen < 1 || i + 1 + attrLen > bytes.size) break
+            val type = bytes[i + 1].toInt() and 0xFF
+            val data = bytes.copyOfRange(i + 2, i + 1 + attrLen)
+            val name = when (type) {
+                0 -> "protocol_version"
+                2 -> "edr_addr"
+                5 -> "firmware_info"
+                13 -> "fw_version"
+                16 -> "name"
+                else -> "attr_$type"
+            }
+            val hex = data.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+            val ascii = data.takeIf { arr -> arr.isNotEmpty() && arr.all { b -> (b.toInt() and 0xFF) in 0x20..0x7E } }
+                ?.toString(Charsets.US_ASCII)
+            lines += if (ascii != null) "$name: $ascii [$hex]" else "$name: $hex"
+            i += attrLen + 1
+        }
+        return lines.joinToString("\n")
+    }
+
+    @Suppress("MissingPermission")
     private fun classicDeviceScore(device: BluetoothDevice): Int {
         val name = device.name?.lowercase().orEmpty()
         var score = 0
@@ -515,5 +712,8 @@ class MainActivity : Activity() {
         private const val SPP_CONNECT_TIMEOUT_MS = 8000L
         private const val SPP_PASSIVE_READ_MS = 3000L
         private const val SPP_CAPTURE_LIMIT = 4096
+        private const val RCSP_RESPONSE_WAIT_MS = 4000L
+        private const val RCSP_CAPTURE_LIMIT = 8192
+        private const val RCSP_TARGET_MASK = 0x00012025
     }
 }
