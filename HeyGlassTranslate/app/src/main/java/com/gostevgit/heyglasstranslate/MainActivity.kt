@@ -50,10 +50,14 @@ class MainActivity : Activity() {
     )
 
     private val uuidReceiver = object : BroadcastReceiver() {
-        @Suppress("DEPRECATION")
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != BluetoothDevice.ACTION_UUID) return
-            val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+            val device = if (Build.VERSION.SDK_INT >= 33) {
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE) as? BluetoothDevice
+            } ?: return
             showClassicBluetoothResult(device, "SDP complete")
         }
     }
