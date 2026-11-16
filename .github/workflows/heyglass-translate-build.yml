@@ -128,3 +128,46 @@ jobs:
           name: am02-ota-probe
           path: am02-ota-probe.json
           if-no-files-found: error
+
+
+  ota_analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and inspect AM02 OTA image
+        shell: bash
+        run: |
+          set -euxo pipefail
+          URL='http://api2.qcwxkjvip.com/download/ota/AM02_V1.0/AM02_2.00.07_260623.bin'
+          curl -fL "$URL" -o AM02_2.00.07_260623.bin
+          ls -l AM02_2.00.07_260623.bin
+          sha256sum AM02_2.00.07_260623.bin
+          file AM02_2.00.07_260623.bin || true
+          python3 - <<'PY'
+          from pathlib import Path
+          import math, collections, json
+          p=Path("AM02_2.00.07_260623.bin")
+          b=p.read_bytes()
+          c=collections.Counter(b)
+          ent=-sum((n/len(b))*math.log2(n/len(b)) for n in c.values())
+          needles=[
+              b"M02_", b"AM02", b"3802", b"1234", b"FEA6",
+              bytes.fromhex("02010A"), bytes.fromhex("0238"),
+              bytes.fromhex("0302A6FE"), bytes.fromhex("3412")
+          ]
+          out={"size":len(b),"entropy_bits_per_byte":ent,"head_hex":b[:128].hex()}
+          for n in needles:
+              out[f"find_{n.hex()}"]=b.find(n)
+          print(json.dumps(out,indent=2))
+          Path("am02-analysis.json").write_text(json.dumps(out,indent=2))
+          PY
+          strings -a -n 4 AM02_2.00.07_260623.bin | head -n 500 > am02-strings-head.txt || true
+
+      - name: Upload AM02 OTA analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: am02-ota-analysis
+          path: |
+            AM02_2.00.07_260623.bin
+            am02-analysis.json
+            am02-strings-head.txt
+          if-no-files-found: error
