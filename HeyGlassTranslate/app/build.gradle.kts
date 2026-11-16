@@ -11,8 +11,8 @@ android {
         applicationId = "com.gostevgit.heyglasstranslate"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.1.9"
+        versionCode = 11
+        versionName = "0.2.0"
     }
 
     buildTypes {
