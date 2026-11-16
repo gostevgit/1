@@ -1,0 +1,32 @@
+name: Build GoPro Wake Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - listen-translate
+    paths:
+      - 'GoProWakeProbe/**'
+      - '.github/workflows/gopro-wake-probe-build.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish Windows x64
+        shell: pwsh
+        run: dotnet publish GoProWakeProbe/GoProWakeProbe.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o GoProWakeProbe/publish
+
+      - name: Upload probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: gopro-wake-probe-win-x64
+          path: GoProWakeProbe/publish/

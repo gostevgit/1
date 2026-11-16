@@ -2,6 +2,12 @@ name: Build HeyGlass Translate
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - listen-translate
+    paths:
+      - 'HeyGlassTranslate/**'
+      - '.github/workflows/heyglass-translate-build.yml'
   pull_request:
     paths:
       - 'HeyGlassTranslate/**'
@@ -24,11 +30,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android 35 platform
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"
+          test -n "$SDK_ROOT"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
 
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
@@ -43,4 +52,177 @@ jobs:
         with:
           name: heyglass-translate-debug
           path: HeyGlassTranslate/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+
+  ota_probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe AM02 latest OTA URL
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, urllib.error
+
+          URL = "https://www.qlifesnap.com/glasses/app-update/last-ota"
+          TOKEN = "15ef6eb5403406c1da0dc4a4defa2ea1"
+          versions = [
+              "AM02_1.00.21_260101",
+              "AM02_1.00.20_251231",
+              "AM02_1.00.19_251201",
+              "AM02_1.00.10_250101",
+              "AM02_1.00.01_240101",
+              "AM02_1.00.21",
+              "1.00.21_260101",
+              "1.00.20_251231",
+              "1.00.10_250101",
+              "1.00.21",
+              "1.00.10",
+              "0.99.99",
+          ]
+          out = []
+          for rom in versions:
+              payload = {
+                  "appId": 4,
+                  "uid": 0,
+                  "hardwareVersion": "AM02_V1.0",
+                  "romVersion": rom,
+                  "os": 1,
+                  "mac": "",
+                  "country": "US",
+                  "dev": 2,
+              }
+              req = urllib.request.Request(
+                  URL,
+                  data=json.dumps(payload).encode(),
+                  headers={"Content-Type":"application/json","token":TOKEN},
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as resp:
+                      body = resp.read().decode("utf-8","replace")
+                      status = resp.status
+              except urllib.error.HTTPError as e:
+                  status = e.code
+                  body = e.read().decode("utf-8","replace")
+              except Exception as e:
+                  status = 0
+                  body = f"{type(e).__name__}: {e}"
+              item = {"romVersion": rom, "http": status, "body": body}
+              out.append(item)
+              print(json.dumps(item, ensure_ascii=False))
+              try:
+                  obj = json.loads(body)
+                  if obj.get("retCode") == 0:
+                      print("FOUND_UPDATE_URL", json.dumps(obj.get("data"), ensure_ascii=False))
+                      break
+              except Exception:
+                  pass
+          with open("am02-ota-probe.json","w",encoding="utf-8") as f:
+              json.dump(out,f,ensure_ascii=False,indent=2)
+          PY
+
+      - name: Upload OTA probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: am02-ota-probe
+          path: am02-ota-probe.json
+          if-no-files-found: error
+
+
+  ota_analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and inspect AM02 OTA image
+        shell: bash
+        run: |
+          set -euxo pipefail
+          URL='http://api2.qcwxkjvip.com/download/ota/AM02_V1.0/AM02_2.00.07_260623.bin'
+          curl -fL "$URL" -o AM02_2.00.07_260623.bin
+          ls -l AM02_2.00.07_260623.bin
+          sha256sum AM02_2.00.07_260623.bin
+          file AM02_2.00.07_260623.bin || true
+          python3 - <<'PY'
+          from pathlib import Path
+          import math, collections, json
+          p=Path("AM02_2.00.07_260623.bin")
+          b=p.read_bytes()
+          c=collections.Counter(b)
+          ent=-sum((n/len(b))*math.log2(n/len(b)) for n in c.values())
+          needles=[
+              b"M02_", b"AM02", b"3802", b"1234", b"FEA6",
+              bytes.fromhex("02010A"), bytes.fromhex("0238"),
+              bytes.fromhex("0302A6FE"), bytes.fromhex("3412")
+          ]
+          out={"size":len(b),"entropy_bits_per_byte":ent,"head_hex":b[:128].hex()}
+          for n in needles:
+              out[f"find_{n.hex()}"]=b.find(n)
+          print(json.dumps(out,indent=2))
+          Path("am02-analysis.json").write_text(json.dumps(out,indent=2))
+          PY
+          strings -a -n 4 AM02_2.00.07_260623.bin | head -n 500 > am02-strings-head.txt || true
+
+      - name: Upload AM02 OTA analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: am02-ota-analysis
+          path: |
+            AM02_2.00.07_260623.bin
+            am02-analysis.json
+            am02-strings-head.txt
+          if-no-files-found: error
+
+
+  ota_route_probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe AM02 OTA routing variants
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, urllib.error, itertools, time
+          URL="https://www.qlifesnap.com/glasses/app-update/last-ota"
+          TOKEN="15ef6eb5403406c1da0dc4a4defa2ea1"
+          rom="AM02_1.00.21_260101"
+          macs=["", "00:11:22:33:44:55", "73:73:59:95:5A:8A"]
+          out=[]
+          for appid,dev,mac in itertools.product((1,4),(1,2),macs):
+              payload={
+                  "appId":appid,"uid":0,"hardwareVersion":"AM02_V1.0",
+                  "romVersion":rom,"os":1,"mac":mac,"country":"US","dev":dev
+              }
+              req=urllib.request.Request(
+                  URL,data=json.dumps(payload).encode(),
+                  headers={"Content-Type":"application/json","token":TOKEN},method="POST"
+              )
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as resp:
+                      body=resp.read().decode("utf-8","replace"); http=resp.status
+              except urllib.error.HTTPError as e:
+                  http=e.code; body=e.read().decode("utf-8","replace")
+              except Exception as e:
+                  http=0; body=f"{type(e).__name__}: {e}"
+              try: obj=json.loads(body)
+              except Exception: obj={}
+              data=obj.get("data") or {}
+              row={
+                  "request":{"appId":appid,"dev":dev,"mac":mac or "<empty>"},
+                  "http":http,"retCode":obj.get("retCode"),
+                  "version":data.get("version"),
+                  "downloadUrl":data.get("downloadUrl"),
+                  "specifyMacUpgrade":data.get("specifyMacUpgrade"),
+                  "updateDesc":data.get("updateDesc"),
+              }
+              out.append(row)
+              print(json.dumps(row,ensure_ascii=False))
+              time.sleep(0.15)
+          with open("am02-ota-routing.json","w",encoding="utf-8") as f:
+              json.dump(out,f,ensure_ascii=False,indent=2)
+          PY
+
+      - name: Upload OTA routing probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: am02-ota-routing
+          path: am02-ota-routing.json
           if-no-files-found: error
