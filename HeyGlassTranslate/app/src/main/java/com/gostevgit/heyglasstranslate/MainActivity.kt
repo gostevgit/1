@@ -189,6 +189,13 @@ class MainActivity : Activity() {
         }, topMargin(10))
 
         root.addView(Button(this).apply {
+            text = "HEYCYAN DEVICE CONFIG (READ ONLY)"
+            setOnClickListener {
+                if (ensurePermissions()) probeHeyCyanDeviceConfig()
+            }
+        }, topMargin(10))
+
+        root.addView(Button(this).apply {
             text = "START LISTEN TRANSLATE"
             setOnClickListener {
                 if (ensurePermissions()) startTranslation()
@@ -766,6 +773,155 @@ class MainActivity : Activity() {
                         append("\nRX bytes: ").append(data.size)
                         append("\nRX: ").append(hex)
                         append("\n").append(parsed)
+                    },
+                    "HeyCyan BLE response received",
+                )
+            }
+        }
+
+        gattRef = device.connectGatt(this, false, callback, BluetoothDevice.TRANSPORT_LE)
+    }
+
+    @Suppress("MissingPermission", "DEPRECATION")
+    private fun probeHeyCyanDeviceConfig() {
+        probeHeyCyanReadOnlyCommand(
+            commandId = 0x47,
+            commandLabel = "Get Device Config",
+        )
+    }
+
+    @Suppress("MissingPermission", "DEPRECATION")
+    private fun probeHeyCyanReadOnlyCommand(commandId: Int, commandLabel: String) {
+        val manager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter = manager.adapter ?: run {
+            classicBluetoothView.text = "Bluetooth adapter unavailable"
+            return
+        }
+        val device = adapter.bondedDevices.orEmpty()
+            .maxByOrNull { classicDeviceScore(it) }
+            ?.takeIf { classicDeviceScore(it) > 0 }
+
+        if (device == null) {
+            classicBluetoothView.text = "No bonded M02/HeyCyan-like device found"
+            return
+        }
+
+        statusView.text = "Connecting to HeyCyan vendor BLE channel…"
+        classicBluetoothView.text = "$commandLabel probe\nOperation: READ ONLY"
+
+        val completed = AtomicBoolean(false)
+        var gattRef: BluetoothGatt? = null
+
+        fun finish(text: String, status: String) {
+            if (!completed.compareAndSet(false, true)) return
+            runOnUiThread {
+                statusView.text = status
+                classicBluetoothView.text = text
+            }
+            runCatching { gattRef?.disconnect() }
+            runCatching { gattRef?.close() }
+        }
+
+        val callback = object : BluetoothGattCallback() {
+            override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    finish("$commandLabel connect failed\nstatus=$status state=$newState", "HeyCyan BLE probe failed")
+                    return
+                }
+                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    gatt.discoverServices()
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED && !completed.get()) {
+                    finish("$commandLabel disconnected before response", "HeyCyan BLE probe failed")
+                }
+            }
+
+            override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    finish("Service discovery failed: $status", "HeyCyan BLE probe failed")
+                    return
+                }
+                val service = gatt.getService(UUID.fromString(HEYCYAN_SERVICE_UUID))
+                val writeChar = service?.getCharacteristic(UUID.fromString(HEYCYAN_WRITE_UUID))
+                val notifyChar = service?.getCharacteristic(UUID.fromString(HEYCYAN_NOTIFY_UUID))
+                if (service == null || writeChar == null || notifyChar == null) {
+                    finish("HeyCyan vendor service/characteristics not found", "HeyCyan BLE probe failed")
+                    return
+                }
+                if (!gatt.setCharacteristicNotification(notifyChar, true)) {
+                    finish("Could not enable de5bf729 notifications", "HeyCyan BLE probe failed")
+                    return
+                }
+                val cccd = notifyChar.getDescriptor(UUID.fromString(CCCD_UUID))
+                if (cccd == null) {
+                    finish("Notify CCCD 0x2902 not found", "HeyCyan BLE probe failed")
+                    return
+                }
+                cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                if (!gatt.writeDescriptor(cccd)) {
+                    finish("Failed to write notify CCCD", "HeyCyan BLE probe failed")
+                }
+            }
+
+            override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                if (descriptor.uuid.toString().lowercase() != CCCD_UUID || completed.get()) return
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    finish("Notify CCCD write failed: $status", "HeyCyan BLE probe failed")
+                    return
+                }
+                val service = gatt.getService(UUID.fromString(HEYCYAN_SERVICE_UUID))
+                val writeChar = service?.getCharacteristic(UUID.fromString(HEYCYAN_WRITE_UUID))
+                if (writeChar == null) {
+                    finish("HeyCyan write characteristic unavailable", "HeyCyan BLE probe failed")
+                    return
+                }
+                val packet = byteArrayOf(
+                    0xBC.toByte(),
+                    commandId.toByte(),
+                    0x00,
+                    0x00,
+                    0xFF.toByte(),
+                    0xFF.toByte(),
+                )
+                writeChar.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                writeChar.value = packet
+                val started = gatt.writeCharacteristic(writeChar)
+                val txHex = packet.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+                runOnUiThread {
+                    classicBluetoothView.text = buildString {
+                        append("HeyCyan vendor BLE connected")
+                        append("\nCommand: ").append(commandLabel).append(" (0x%02X)".format(commandId))
+                        append("\nOperation: READ ONLY")
+                        append("\nTX: ").append(txHex)
+                        append("\nWaiting for notification…")
+                    }
+                }
+                if (!started) {
+                    finish("$commandLabel write could not be started", "HeyCyan BLE probe failed")
+                    return
+                }
+                Thread {
+                    Thread.sleep(HEYCYAN_RESPONSE_WAIT_MS)
+                    if (!completed.get()) {
+                        finish(
+                            "$commandLabel\nRX: no notification within $HEYCYAN_RESPONSE_WAIT_MS ms",
+                            "HeyCyan BLE request sent · no response",
+                        )
+                    }
+                }.start()
+            }
+
+            override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+                if (characteristic.uuid.toString().lowercase() != HEYCYAN_NOTIFY_UUID || completed.get()) return
+                val data = characteristic.value ?: byteArrayOf()
+                val hex = data.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+                finish(
+                    buildString {
+                        append("HeyCyan vendor BLE: RESPONSE RECEIVED")
+                        append("\nCommand: ").append(commandLabel).append(" (0x%02X)".format(commandId))
+                        append("\nOperation: READ ONLY")
+                        append("\nRX bytes: ").append(data.size)
+                        append("\nRX: ").append(hex)
+                        append("\n").append(parseHeyCyanPacket(data))
                     },
                     "HeyCyan BLE response received",
                 )
