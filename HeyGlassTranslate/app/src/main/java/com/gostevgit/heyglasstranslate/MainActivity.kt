@@ -196,6 +196,20 @@ class MainActivity : Activity() {
         }, topMargin(10))
 
         root.addView(Button(this).apply {
+            text = "FORCE NAME → GoPro 1234"
+            setOnClickListener {
+                if (ensurePermissions()) setJieLiBluetoothName("GoPro 1234")
+            }
+        }, topMargin(10))
+
+        root.addView(Button(this).apply {
+            text = "RESTORE NAME → M02_A94B"
+            setOnClickListener {
+                if (ensurePermissions()) setJieLiBluetoothName("M02_A94B")
+            }
+        }, topMargin(10))
+
+        root.addView(Button(this).apply {
             text = "START LISTEN TRANSLATE"
             setOnClickListener {
                 if (ensurePermissions()) startTranslation()
@@ -952,11 +966,201 @@ class MainActivity : Activity() {
         }
     }
 
+    @Suppress("MissingPermission", "DEPRECATION")
+    private fun setJieLiBluetoothName(newName: String) {
+        if (newName.toByteArray(Charsets.UTF_8).size > 20) {
+            classicBluetoothView.text = "Name too long for JieLi RCSP (max 20 bytes)"
+            return
+        }
+
+        val manager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter = manager.adapter ?: run {
+            classicBluetoothView.text = "Bluetooth adapter unavailable"
+            return
+        }
+
+        val device = adapter.bondedDevices.orEmpty()
+            .maxByOrNull { classicDeviceScore(it) }
+            ?.takeIf { classicDeviceScore(it) > 0 }
+
+        if (device == null) {
+            classicBluetoothView.text = "No bonded M02/GoPro test device found"
+            return
+        }
+
+        statusView.text = "Trying JieLi RCSP name change…"
+        classicBluetoothView.text = buildString {
+            append("JieLi RCSP name write")
+            append("\nTarget: ").append(newName)
+            append("\nService: AE30")
+            append("\nOpcode: SET_ADV 0xC0")
+            append("\nAttribute: EDR_NAME 0x01")
+        }
+
+        val done = AtomicBoolean(false)
+        var gattRef: BluetoothGatt? = null
+
+        fun finish(msg: String, status: String) {
+            if (!done.compareAndSet(false, true)) return
+            runOnUiThread {
+                statusView.text = status
+                classicBluetoothView.text = msg
+            }
+            runCatching { gattRef?.disconnect() }
+            runCatching { gattRef?.close() }
+        }
+
+        val callback = object : BluetoothGattCallback() {
+            override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    finish("AE30 connect failed: status=$status state=$newState", "JieLi name write failed")
+                    return
+                }
+                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    gatt.discoverServices()
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED && !done.get()) {
+                    finish("Disconnected before RCSP response", "JieLi name write failed")
+                }
+            }
+
+            override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    finish("Service discovery failed: $status", "JieLi name write failed")
+                    return
+                }
+                val service = gatt.getService(UUID.fromString(JIELI_RCSP_SERVICE_UUID))
+                val writeChar = service?.getCharacteristic(UUID.fromString(JIELI_RCSP_WRITE_UUID))
+                val notifyChar = service?.getCharacteristic(UUID.fromString(JIELI_RCSP_NOTIFY_UUID))
+                if (service == null || writeChar == null || notifyChar == null) {
+                    finish(
+                        buildString {
+                            append("AE30 RCSP channel not found")
+                            append("\nservice=").append(service != null)
+                            append(" write(AE01)=").append(writeChar != null)
+                            append(" notify(AE02)=").append(notifyChar != null)
+                        },
+                        "JieLi name write unavailable",
+                    )
+                    return
+                }
+
+                if (!gatt.setCharacteristicNotification(notifyChar, true)) {
+                    finish("Could not enable AE02 notifications", "JieLi name write failed")
+                    return
+                }
+                val cccd = notifyChar.getDescriptor(UUID.fromString(CCCD_UUID))
+                if (cccd == null) {
+                    finish("AE02 CCCD 0x2902 not found", "JieLi name write failed")
+                    return
+                }
+                cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                if (!gatt.writeDescriptor(cccd)) {
+                    finish("Could not write AE02 CCCD", "JieLi name write failed")
+                }
+            }
+
+            override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                if (descriptor.uuid.toString().lowercase() != CCCD_UUID || done.get()) return
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    finish("AE02 CCCD write failed: $status", "JieLi name write failed")
+                    return
+                }
+
+                val service = gatt.getService(UUID.fromString(JIELI_RCSP_SERVICE_UUID))
+                val writeChar = service?.getCharacteristic(UUID.fromString(JIELI_RCSP_WRITE_UUID))
+                if (writeChar == null) {
+                    finish("AE01 write characteristic missing", "JieLi name write failed")
+                    return
+                }
+
+                val nameBytes = newName.toByteArray(Charsets.UTF_8)
+                val attr = ByteArray(nameBytes.size + 2)
+                attr[0] = (nameBytes.size + 1).toByte()
+                attr[1] = 0x01
+                nameBytes.copyInto(attr, 2)
+
+                val frame = ByteArray(8 + attr.size)
+                frame[0] = 0xFE.toByte()
+                frame[1] = 0xDC.toByte()
+                frame[2] = 0xBA.toByte()
+                frame[3] = 0xC0.toByte()
+                frame[4] = 0xC0.toByte()
+                frame[5] = ((attr.size ushr 8) and 0xFF).toByte()
+                frame[6] = (attr.size and 0xFF).toByte()
+                attr.copyInto(frame, 7)
+                frame[frame.lastIndex] = 0xEF.toByte()
+
+                val txHex = frame.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+                writeChar.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                writeChar.value = frame
+
+                runOnUiThread {
+                    classicBluetoothView.text = buildString {
+                        append("JieLi RCSP SET_ADV")
+                        append("\nTarget name: ").append(newName)
+                        append("\nTX: ").append(txHex)
+                        append("\nWaiting for AE02 response…")
+                    }
+                }
+
+                if (!gatt.writeCharacteristic(writeChar)) {
+                    finish("AE01 write could not be started", "JieLi name write failed")
+                    return
+                }
+
+                Thread {
+                    Thread.sleep(JIELI_RCSP_WAIT_MS)
+                    if (!done.get()) {
+                        finish(
+                            buildString {
+                                append("RCSP SET_ADV sent, but no AE02 response.")
+                                append("\nTarget: ").append(newName)
+                                append("\nMost likely this firmware requires JieLi authentication before SET_ADV.")
+                                append("\nNo reboot command was sent.")
+                            },
+                            "Name write not confirmed",
+                        )
+                    }
+                }.start()
+            }
+
+            override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+                if (characteristic.uuid.toString().lowercase() != JIELI_RCSP_NOTIFY_UUID || done.get()) return
+                val data = characteristic.value ?: byteArrayOf()
+                val hex = data.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+                val success = data.size >= 8 &&
+                    (data[0].toInt() and 0xFF) == 0xFE &&
+                    (data[1].toInt() and 0xFF) == 0xDC &&
+                    (data[2].toInt() and 0xFF) == 0xBA &&
+                    (data[4].toInt() and 0xFF) == 0xC0
+
+                finish(
+                    buildString {
+                        append("AE30/AE02 response received")
+                        append("\nTarget name: ").append(newName)
+                        append("\nRX: ").append(hex)
+                        if (success) {
+                            append("\nSET_ADV response detected.")
+                            append("\nPower-cycle the glasses, then check nRF Scanner / Wake.")
+                            append("\nIf the name changed, use RESTORE NAME to return M02_A94B.")
+                        } else {
+                            append("\nResponse is not a confirmed SET_ADV acknowledgement.")
+                        }
+                    },
+                    if (success) "JieLi name command acknowledged" else "JieLi response received",
+                )
+            }
+        }
+
+        gattRef = device.connectGatt(this, false, callback, BluetoothDevice.TRANSPORT_LE)
+    }
+
     @Suppress("MissingPermission")
     private fun classicDeviceScore(device: BluetoothDevice): Int {
         val name = device.name?.lowercase().orEmpty()
         var score = 0
         if (name.startsWith("m02")) score += 500
+        if (name.startsWith("gopro")) score += 450
         if ("hey" in name) score += 200
         if ("cyan" in name) score += 200
         if ("glass" in name) score += 100
@@ -1086,5 +1290,9 @@ class MainActivity : Activity() {
         private const val HEYCYAN_NOTIFY_UUID = "de5bf729-d711-4e47-af26-65e3012a5dc7"
         private const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
         private const val HEYCYAN_RESPONSE_WAIT_MS = 5000L
+        private const val JIELI_RCSP_SERVICE_UUID = "0000ae30-0000-1000-8000-00805f9b34fb"
+        private const val JIELI_RCSP_WRITE_UUID = "0000ae01-0000-1000-8000-00805f9b34fb"
+        private const val JIELI_RCSP_NOTIFY_UUID = "0000ae02-0000-1000-8000-00805f9b34fb"
+        private const val JIELI_RCSP_WAIT_MS = 4000L
     }
 }
